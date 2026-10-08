@@ -13,8 +13,8 @@ It combines three things:
   is a one-line fix arriving with four user stories and sixteen acceptance criteria; three tracks exist
   precisely to prevent that.
 
-Works with **opencode** and **Claude Code** from the same source. Anything else that reads `AGENTS.md`
-gets the harness too.
+Works with **opencode**, **Claude Code**, and **Antigravity** (`agy`) from the same source. Anything
+else that reads `AGENTS.md` gets the harness too.
 
 ---
 
@@ -28,8 +28,12 @@ npm install -g @fission-ai/openspec@latest    # needs Node 20.19+
 $EDITOR openspec/project.md
 
 # 2. Start working.
-opencode                                      # or: claude
+opencode                                      # or: claude, or: agy
 ```
+
+**First time opening this folder in `agy`:** Antigravity ties a workspace to a registered project,
+and only a registered project's `.agents/` is read. If a fresh directory does not show the fleet or
+skills below, run `agy --new-project` once — after that, plain `agy` in the same folder sees it.
 
 Then, in the session:
 
@@ -55,7 +59,8 @@ And the OpenSpec workflows underneath them:
 | `/opsx-archive` | Folds the delta into `openspec/specs/` |
 | `/opsx-explore`, `/opsx-update`, `/opsx-sync` | Investigate, revise, reconcile |
 
-In Claude Code the `opsx` commands are namespaced: `/opsx:propose`.
+In Claude Code the `opsx` commands are namespaced: `/opsx:propose`. In Antigravity, `/board`,
+`/track`, `/gate`, and `/kickoff` live as workflows rather than commands — same names, same behavior.
 
 ---
 
@@ -117,7 +122,7 @@ development with the non-determinism of a language model, and inherits the downs
 ## Layout
 
 ```
-AGENTS.md                  The harness. Read by opencode and anything AGENTS.md-aware.
+AGENTS.md                  The harness. Read by opencode, Antigravity, and anything AGENTS.md-aware.
 CLAUDE.md                  Imports AGENTS.md, so Claude Code reads the same contract.
 opencode.json              opencode project config — instructions and tool permissions.
 
@@ -132,10 +137,11 @@ harness/                   ← THE ONLY PLACE YOU EDIT agents, skills, and comma
   skills/                  Seventeen skills, from spec conventions to incident response.
   commands/                board, track, gate, kickoff.
 
-scripts/sync-harness.mjs   Distributes harness/ to .claude/ and .opencode/.
+scripts/sync-harness.mjs   Distributes harness/ to .claude/, .opencode/, and .agents/.
 docs/adr/                  Architecture decision records, with the process and template.
 
 .claude/ .opencode/        GENERATED. Committed so a fresh clone works with no build step.
+.agents/                   GENERATED too — Antigravity's own directory convention.
 ```
 
 ### Editing the harness
@@ -145,13 +151,17 @@ $EDITOR harness/agents/dev.md
 node scripts/sync-harness.mjs
 ```
 
-`harness/` is canonical. The copies under `.claude/` and `.opencode/` are generated — edit those and
-the next sync overwrites them. Agent charters carry tool-neutral frontmatter, which the script
-transforms per tool: Claude Code gets `tools:` and a `model:` resolved from `model-tier`, opencode gets
-`mode:` and a `permission:` map.
+`harness/` is canonical. The copies under `.claude/`, `.opencode/`, and `.agents/` are generated —
+edit those and the next sync overwrites them. Agent charters carry tool-neutral frontmatter, which the
+script transforms per tool: Claude Code gets `tools:` and a `model:` resolved from `model-tier`,
+opencode gets `mode:` and a `permission:` map, and Antigravity gets `subagent`/`mainAgent` flags plus a
+`tools:` list and `commandExecutionPolicy` **derived from the same `opencode-permission` edit/bash
+flags** (`bash: allow` → `run_command`; `edit: allow` → `replace_file_content` + `write_to_file`) —
+there is no fourth field to maintain by hand.
 
 The `opsx-*` commands and `openspec-*` skills come from `openspec init` and are **not** owned by the
-sync script. Refresh them with `openspec update`.
+sync script. Refresh them with `openspec update` (run once per tool you added: `openspec init --tools
+<tool>` the first time, `openspec update` after).
 
 ### Choosing models in opencode
 
@@ -167,6 +177,32 @@ workspace pointed at a different provider is not overridden. To pin them:
   }
 }
 ```
+
+### Using Antigravity (`agy`)
+
+Antigravity ties a workspace to a **registered project** — only a registered project's `.agents/` is
+read. A brand-new directory needs one of:
+
+```bash
+agy --new-project          # first time in this folder, non-interactive
+agy                        # or just open it interactively; it will offer to register
+```
+
+After that, plain `agy` in the same folder sees the fleet and skills. This is a real, confirmed
+requirement — a plain `agy` in an unregistered directory silently falls back to whatever project was
+last active and will not show any of this workspace's agents, skills, or workflows, with no error.
+
+Two format differences from Claude Code and opencode, both handled by the sync script automatically:
+
+- **Agents are subagents, never primary.** Every charter syncs with `subagent: true, mainAgent: false`
+  — the fleet is invoked by the top-level Antigravity session via `invoke_subagent`, the same role the
+  orchestrator plays for Claude Code and opencode. None of the seven appears in Antigravity's own
+  `/agents` switcher, by design.
+- **Commands are workflows.** Antigravity has no separate slash-command mechanism and does not expand
+  `$ARGUMENTS` or inline `` !`cmd` `` the way Claude Code and opencode do (confirmed against a live
+  install) — `board`/`track`/`gate`/`kickoff` are generated into `.agents/workflows/` instead, with
+  both rewritten as plain instructions for the agent to act on with its own tools. This matches how
+  OpenSpec's own `opsx-*` output behaves for this tool.
 
 ---
 
@@ -203,6 +239,10 @@ Loaded on demand by whichever agent's charter names them.
 Both hooks are Node, not `bash` + `jq`. Node is already required here (the OpenSpec CLI needs it) while
 `jq` is absent on plenty of machines — and a fail-closed guard whose only dependency is missing denies
 every write in the repo, which reads as a broken workspace rather than as protection.
+
+Only Claude Code's PreToolUse hooks are wired up. Antigravity's `commandExecutionPolicy` (`auto` for
+every agent granted `run_command`) and its own sandbox are the equivalent guard rail there; opencode's
+equivalent is the `permission` map in each generated agent file plus `opencode.json`.
 
 ---
 
