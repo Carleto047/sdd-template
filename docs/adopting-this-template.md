@@ -16,7 +16,7 @@ running `openspec init`, which would regenerate what is already here:
 
 ```
 AGENTS.md  CLAUDE.md  opencode.json  harness/  scripts/  openspec/  docs/adr/
-.claude/   .opencode/
+.claude/   .opencode/   .agents/
 ```
 
 Merge rather than overwrite if the repo already has a `CLAUDE.md`, an `AGENTS.md`, or a `.gitignore`.
@@ -93,6 +93,12 @@ openspec doctor
 node scripts/sync-harness.mjs     # should be a no-op on a clean checkout
 opencode agent list               # should list the seven specialists
 ```
+
+Using Antigravity instead? Register the directory first — `agy --new-project` (or open `agy`
+interactively and accept its offer to register the folder) — a plain `agy` in a never-registered
+directory silently falls back to another project's context and will not see `.agents/` at all. Once
+registered, ask it directly: *"list every custom agent and every custom skill or workflow you can see
+for this workspace"* should name all seven agents and every `harness/skills/` entry.
 
 Then, in a session, run `/board`. If it reports the workspace is set up but the project has not been
 declared yet, everything is wired correctly and the next step is `openspec/project.md`.
