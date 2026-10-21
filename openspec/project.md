@@ -1,125 +1,124 @@
-# Declaración del proyecto
+# Especificación del Proyecto: Juego de Preguntados Web
 
-## Qué es este sistema
+Este documento define la arquitectura, el stack tecnológico, las especificaciones de diseño y las convenciones de desarrollo para el juego de preguntas y respuestas (estilo Preguntados) basado en el repositorio `sdd-template`.
 
-Juego web de preguntas estilo Preguntados para dos personas que juegan por turnos desde el mismo
-navegador. Conserva el diseño clásico: la ruleta, sus colores, sus sectores y el puntero. El
-frontend obtiene cada pregunta desde una API FastAPI y nunca accede directamente a PostgreSQL.
+---
 
-La primera versión se ejecuta en localhost. No incluye cuentas, multijugador remoto, persistencia
-de partidas ni protección contra trampas.
+## 1. Stack Tecnológico
 
-Lo que no debe fallar: cada pregunta mostrada debe coincidir con la respuesta que la API declara
-correcta, y un error de la API nunca debe borrar el turno ni la puntuación.
+El proyecto está estructurado de manera desacoplada utilizando herramientas modernas y tipadas:
 
-## Runtime y lenguaje
+*   **Frontend:** React (v18+) inicializado con **Vite** y configurado con **TypeScript**. Ubicado en la raíz y la carpeta `src/`.
+*   **Backend (API):** **FastAPI** (Python 3.10+) encargado de la lógica de negocio, validaciones y exposición de endpoints REST. Ubicado en la carpeta `backend/`.
+*   **Base de Datos:** **PostgreSQL** para la persistencia de preguntas, categorías, opciones y respuestas correctas.
+*   **Estilos / UI:** CSS nativo, Tailwind CSS o módulos de CSS garantizando fidelidad visual con el diseño de referencia (clásica ruleta colorida).
 
-| Concepto | Decisión |
-|---|---|
-| Lenguaje y versión | TypeScript en modo estricto; React 19 |
-| Runtime de compilación | Node.js LTS |
-| Versiones fijadas por | `.nvmrc` y `package-lock.json` |
-| Un comando para compilar | `npm run build` |
-| Un comando para probar | `npm test` |
-| Un comando para lint y formato | `npm run lint` |
-| Un comando para verificar tipos | `npm run typecheck` |
-| Cobertura mínima | 70% de líneas sobre `src/features` |
+---
 
-## Frameworks y librerías
+## 2. Arquitectura y Estructura del Repositorio
 
-- **Frontend**: React, Vite y TypeScript. La ruleta se dibuja con SVG y se anima con CSS.
-- **Estilos**: CSS Modules y variables CSS. Los colores de la ruleta se declaran en un único tema.
-- **Estado**: React Context y `useReducer` para la partida (jugadores, puntuación, turno y
-  pregunta actual).
-- **Pruebas**: Vitest y React Testing Library. Las pruebas no llaman a la API real.
-- **API**: FastAPI es un servicio existente fuera de este repositorio. Es dueño de la validación y
-  del acceso a PostgreSQL.
+El repositorio sigue un patrón de monorepo simplificado:
 
-## Almacenes de datos
+```text
+sdd-template/
+├── .opencode/           # Configuración del agente y especificaciones
+│   └── openspec/
+│       └── project.md   # [Este archivo] Especificación técnica
+├── backend/             # Directorio del servidor Python
+│   ├── venv/            # Entorno virtual de Python
+│   ├── main.py          # Punto de entrada de FastAPI e inicialización de Uvicorn
+│   └── ...              # Modelos, esquemas y conexión a PostgreSQL
+├── src/                 # Código fuente del Frontend (React + TS)
+│   ├── assets/          # Imágenes, SVG (Ruleta, iconos de corona)
+│   ├── components/      # Componentes UI (Ruleta, Tablero, TarjetaPregunta)
+│   ├── App.tsx          # Componente principal de control de estados del juego
+│   └── main.tsx         # Punto de entrada de React
+├── vite.config.ts       # Configuración de Vite y Proxy de desarrollo
+└── package.json         # Dependencias del Frontend y scripts de Node
+```
 
-| Almacén | Contenido | Migraciones |
-|---|---|---|
-| Memoria del navegador | Jugadores, puntuación, turno y pregunta mostrada | Ninguna; se reinicia al recargar |
-| PostgreSQL | Preguntas | Proyecto FastAPI, fuera de este repositorio |
+---
 
-El navegador nunca recibe credenciales de PostgreSQL.
+## 3. Mecánica del Juego (Flujo del Usuario)
 
-## Identidad y secretos
+El juego está diseñado para **dos jugadores locales** (compartiendo la misma pantalla/navegador):
 
-- No hay usuarios ni autenticación en la primera versión: el navegador es un cliente anónimo.
-- Este proyecto no necesita secretos. `VITE_API_BASE_URL` solo contiene la URL base de la API
-  (en desarrollo, `http://localhost:8000`) y queda visible en el paquete del navegador.
-- `.env.local` no se versiona. `.env.example` documenta las variables.
-- Nunca se guardan tokens, contraseñas ni credenciales en variables `VITE_*`.
+1.  **Pantalla de Inicio / Turno:** Se muestra el jugador activo ("Jugador 1" o "Jugador 2") junto a la ruleta clásica dividida en 6 secciones de colores (Categorías) y una sección especial de **¡Comodín!**.
+2.  **Giro de Ruleta:** El usuario presiona "¡Girar Ruleta!". La ruleta gira visualmente (vía animaciones CSS/Canvas) y se detiene en una categoría aleatoria.
+    *   *Caso Comodín:* Si cae en Comodín, se habilitan los 6 botones inferiores para que el jugador elija la categoría que prefiera de forma manual.
+3.  **Consulta a la API:** El cliente frontend genera un número de ID aleatorio (o secuencial según la lógica de partida) y realiza la petición HTTP a la API de FastAPI.
+4.  **Pantalla de Pregunta:** Se renderiza la pregunta obtenida con sus 4 opciones en forma de botones.
+5.  **Validación y Puntaje:** El jugador selecciona una opción:
+    *   Si es correcta, suma un punto (o una corona de esa categoría) y mantiene el turno.
+    *   Si es incorrecta, el turno cambia al otro jugador.
 
-## Límites de servicios
+---
 
-| Servicio | Responsabilidad | Protocolo |
-|---|---|---|
-| Aplicación React | Interfaz, ruleta, turnos, puntuación y cliente de preguntas | HTTP y JSON hacia FastAPI |
-| API FastAPI | Validación y consulta de preguntas | Adaptador de datos hacia PostgreSQL |
-| PostgreSQL | Persistencia de preguntas | — |
+## 4. Integración Frontend y API (Contrato de Datos)
 
-## Contrato de la API de preguntas
+### Configuración del Proxy de Desarrollo
+Para evitar problemas de Cross-Origin Resource Sharing (CORS) y resolver conflictos de puertos durante el desarrollo local, `vite.config.ts` utiliza un proxy inverso que mapea las consultas del puerto `5173` al puerto `8000`:
 
-- **Método y ruta**: `GET /api/v1/question/{id}`
-- **URL base**: `VITE_API_BASE_URL`
-- **Identificador**: entero en la ruta
-- **Selección de pregunta**: el frontend elige un id al azar dentro del rango configurado.
-- **CORS**: FastAPI debe permitir el origen del frontend (`http://localhost:5173` en desarrollo).
+*   **Ruta Frontend:** `http://localhost:5173/api/v1/...`
+*   **Destino Real (Backend):** `http://localhost:8000/api/v1/...`
 
-Respuesta esperada:
+### Consumo del Endpoint
+El Frontend consume las preguntas realizando peticiones HTTP utilizando la Fetch API nativa de JavaScript o Axios:
+
+*   **Método:** `GET`
+*   **URL:** `http://localhost:8000/api/v1/question/<id>`
+
+### Formato de Respuesta de la API (JSON)
+La base de datos PostgreSQL proveerá la información a través de FastAPI respetando estrictamente el siguiente esquema de datos tipado en TypeScript:
 
 ```json
 {
-  "id": 42,
-  "pregunta": "¿Cuál es el planeta conocido como planeta rojo?",
-  "opciones": ["Venus", "Marte", "Júpiter", "Saturno"],
-  "respuesta_correcta": "Marte"
+  "id": 1,
+  "categoria": "Geografía",
+  "pregunta": "¿Cuál es la capital de Francia?",
+  "opciones": [
+    "Madrid",
+    "París",
+    "Roma",
+    "Berlín"
+  ],
+  "respuesta_correcta": "París"
 }
 ```
 
-Reglas del contrato:
+### Interfaz de TypeScript Correspondiente (`src/types/game.ts`)
+```typescript
+export interface Question {
+  id: number;
+  categoria: 'Geografía' | 'Arte' | 'Ciencia' | 'Matemáticas' | 'Historia' | 'Deportes';
+  pregunta: string;
+  opciones: string[];
+  respuesta_correcta: string;
+}
+```
 
-- `id` es un número.
-- `pregunta` es texto no vacío.
-- `opciones` es una lista de textos no vacíos.
-- `respuesta_correcta` es el texto exacto de una de las opciones.
-- El cliente valida estos campos en tiempo de ejecución.
-- Un error HTTP, una respuesta inválida o una API no disponible se muestran como un estado
-  recuperable con botón de reintento. El reintento no borra el turno ni la puntuación.
-- Los componentes no conocen la URL ni construyen la ruta de la API.
+---
 
-Límite de seguridad: `respuesta_correcta` llega al navegador. Es aceptable para el juego local,
-pero no resiste trampas. Una versión pública debe evaluar la respuesta dentro de FastAPI.
+## 5. Diseño Visual y UI de Referencia
 
-## Despliegue
+La interfaz debe cumplir de manera estricta con las pautas estéticas de la imagen de muestra:
 
-- **Ahora**: equipo de desarrollo local. Vite en `http://localhost:5173`, FastAPI en
-  `http://localhost:8000`. Prueba del build con `npm run preview`.
-- **Después (fuera de alcance por ahora)**: frontend como sitio estático y API con PostgreSQL en un
-  servicio alojado, con HTTPS y CORS ajustado al dominio publicado.
-- **Rollback**: volver al último commit estable.
+*   **Contenedor Principal:** Tarjeta central con bordes redondeados (`border-radius`), sombras suaves (`box-shadow`), y un fondo degradado sutil.
+*   **La Ruleta:** Un círculo dividido simétricamente en sectores usando los colores característicos del juego original:
+    *   🔴 Rojo (Historia)
+    *   🟡 Amarillo (Ciencia)
+    *   🟢 Verde (Deportes)
+    *   🔵 Azul / Celeste (Geografía)
+    *   🟠 Naranja (Arte)
+    *   🟣 Morado / Violeta (Matemáticas)
+*   **Botones de Acción:** Botones de categorías planos con bordes ligeramente redondeados, utilizando una paleta de colores pastel/azul desaturado para el estado de selección inactivo.
+*   **Tipografía:** Limpia, sans-serif, con variaciones de peso (`font-weight: bold`) para resaltar el jugador actual y los eventos importantes ("¡Comodín!").
 
-## Observabilidad
+---
 
-Los errores de la API se escriben en la consola del navegador con `event`, `questionId`, `method`,
-`path` y `status`. No se registra `respuesta_correcta`.
+## 6. Convenciones de Desarrollo
 
-## Convenciones
+1.  **Control de Estados:** El estado de los puntajes de ambos jugadores, las categorías obtenidas y el turno actual deben ser manejados mediante un estado centralizado en `App.tsx` (o un Context Provider si el proyecto escala).
+2.  **Manejo de Errores HTTP:** Si la API devuelve un error o se cae la conexión, el frontend debe renderizar un estado de contingencia elegante (un componente de alerta con un botón de reintento controlado) para evitar pantallas en blanco.
+3.  **Tipado Estricto:** Está prohibido el uso del tipo `any` en TypeScript. Todas las propiedades de los componentes de la ruleta y las tarjetas de preguntas deben estar debidamente interfaces/types definidos.
 
-- TypeScript con `strict: true`; no se permite `any` sin justificación.
-- Componentes en PascalCase; funciones, variables y módulos en camelCase; estilos en kebab-case.
-- Estructura: `src/app`, `src/features/game`, `src/features/questions`, `src/components`,
-  `src/styles`.
-- Las transiciones de la partida son funciones puras y se prueban sin montar componentes.
-- Los componentes no hacen solicitudes HTTP; usan hooks o la capa de API.
-- La animación respeta `prefers-reduced-motion`. El resultado del giro se anuncia también en una
-  región viva para lectores de pantalla.
-- Los controles son botones accesibles y se pueden usar con teclado.
-- Los textos visibles están en español.
-- Los comentarios explican razones, no historial.
-
-## Excepciones registradas
-
-Ninguna.
