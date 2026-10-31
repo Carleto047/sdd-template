@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import random
 from database import SessionLocal, engine, Base
 from models import QuestionModel
+from desafio import router as desafio_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -16,6 +17,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(desafio_router)
 
 # Tiempo en segundos según la dificultad de la pregunta
 TIEMPOS_POR_DIFICULTAD = {"facil": 15, "normal": 30, "dificil": 40}
