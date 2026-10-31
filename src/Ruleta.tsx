@@ -7,6 +7,9 @@ const MINUTOS_BLOQUEO = 20;
 const CLAVE_BLOQUEO = 'preguntados_bloqueo_hasta';
 const CLAVE_RECORD = 'preguntados_record';
 
+// URL del backend desplegado en Render
+const API_BASE_URL = 'https://preguntados-backend-ppdb.onrender.com';
+
 const PISTAS_MUSICA = ['/sounds/musica1.wav'];
 const SONIDOS_GIRO = ['/sounds/giro-1.wav', '/sounds/giro-2.wav'];
 const SONIDOS_CORRECTO = ['/sounds/correcto-1.wav', '/sounds/correcto-2.wav', '/sounds/correcto-3.wav'];
@@ -28,23 +31,33 @@ const reproducir = (ruta: string) => {
 };
 
 const data = [
-  { option: 'Geografía', style: { backgroundColor: '#e74c3c', textColor: 'white' } },
-  { option: 'Ciencia', style: { backgroundColor: '#2ecc71', textColor: 'white' } },
-  { option: 'Historia', style: { backgroundColor: '#f1c40f', textColor: 'black' } },
-  { option: 'Arte', style: { backgroundColor: '#9b59b6', textColor: 'white' } },
-  { option: 'Deportes', style: { backgroundColor: '#e67e22', textColor: 'white' } },
-  { option: 'Entretenimiento', style: { backgroundColor: '#3498db', textColor: 'white' } },
-  { option: 'IESETyFP', style: { backgroundColor: '#1abc9c', textColor: 'white' } },
+  { option: '🌍 Geografía', style: { backgroundColor: '#ff5252', textColor: 'white' } },
+  { option: '🔬 Ciencia', style: { backgroundColor: '#4caf50', textColor: 'white' } },
+  { option: '📜 Historia', style: { backgroundColor: '#ffeb3b', textColor: '#212121' } },
+  { option: '🎨 Arte', style: { backgroundColor: '#ab47bc', textColor: 'white' } },
+  { option: '⚽ Deportes', style: { backgroundColor: '#ff9800', textColor: 'white' } },
+  { option: '🎬 Entretenimiento', style: { backgroundColor: '#29b6f6', textColor: 'white' } },
+  { option: '🎓 IESETyFP', style: { backgroundColor: '#26a69a', textColor: 'white' } },
 ];
 
-const CATEGORIAS = data.map((d) => d.option);
+const CATEGORIAS = ['Geografía', 'Ciencia', 'Historia', 'Arte', 'Deportes', 'Entretenimiento', 'IESETyFP'];
 
-type Modo = 'solo' | 'duelo';
+const STICKERS_CATEGORIA: Record<string, string> = {
+  'Geografía': '🌍',
+  'Ciencia': '🔬',
+  'Historia': '📜',
+  'Arte': '🎨',
+  'Deportes': '⚽',
+  'Entretenimiento': '🎬',
+  'IESETyFP': '🎓'
+};
+
+type Modo = 'solo' | 'duelo' | 'desafio';
 
 export default function Ruleta() {
   const [modo, setModo] = useState<Modo>('solo');
 
-  // --- Estado compartido de la ruleta/pregunta ---
+  // --- Estado compartido ---
   const [mustSpin, setMustSpin] = useState(false);
   const [prizeNumber, setPrizeNumber] = useState(0);
   const [pregunta, setPregunta] = useState<any>(null);
@@ -59,7 +72,7 @@ export default function Ruleta() {
   const preguntasRecientesRef = useRef<number[]>([]);
   const ticReproducidoRef = useRef<boolean>(false);
 
-  // --- Estado del modo 1 Jugador ---
+  // --- Estado 1 Jugador ---
   const [rachaCorrectas, setRachaCorrectas] = useState<number>(0);
   const [rachaIncorrectas, setRachaIncorrectas] = useState<number>(0);
   const [vidas, setVidas] = useState<number>(VIDAS_INICIALES);
@@ -71,17 +84,29 @@ export default function Ruleta() {
   const [bloqueadoHasta, setBloqueadoHasta] = useState<number | null>(null);
   const [tiempoRestanteBloqueo, setTiempoRestanteBloqueo] = useState<string>('');
 
-  // --- Estado del modo 1vs1 ---
+  // --- Estado 1vs1 (Clásico de Coronas) ---
   const [turno, setTurno] = useState<1 | 2>(1);
-  const [coronas, setCoronas] = useState<Record<string, 1 | 2 | null>>(
-    Object.fromEntries(CATEGORIAS.map((c) => [c, null]))
-  );
+  const [progreso, setProgreso] = useState<Record<1 | 2, Record<string, number>>>({
+    1: Object.fromEntries(CATEGORIAS.map((c) => [c, 0])),
+    2: Object.fromEntries(CATEGORIAS.map((c) => [c, 0])),
+  });
+  const [coronas, setCoronas] = useState<Record<1 | 2, string[]>>({ 1: [], 2: [] });
   const [rachaTurno, setRachaTurno] = useState<{ 1: number; 2: number }>({ 1: 0, 2: 0 });
   const [comodinDuelo, setComodinDuelo] = useState<{ 1: boolean; 2: boolean }>({ 1: false, 2: false });
-  const [esReto, setEsReto] = useState<boolean>(false);
+  const [esRetoCorona, setEsRetoCorona] = useState<boolean>(false);
+  const [categoriaRetada, setCategoriaRetada] = useState<string | null>(null);
   const [ganadorDuelo, setGanadorDuelo] = useState<1 | 2 | null>(null);
 
-  // --- Música de fondo y pantalla completa ---
+  // --- Estado Modo Desafío (14 preguntas, 2 por categoría) ---
+  const [turnoDesafio, setTurnoDesafio] = useState<1 | 2>(1);
+  const [preguntaNumeroDesafio, setPreguntaNumeroDesafio] = useState<number>(1);
+  const [statsDesafio, setStatsDesafio] = useState({
+    1: { correctas: 0, tiempoTotal: 0 },
+    2: { correctas: 0, tiempoTotal: 0 }
+  });
+  const [desafioTerminado, setDesafioTerminado] = useState<boolean>(false);
+
+  // --- Música y pantalla completa ---
   const musicaRef = useRef<HTMLAudioElement | null>(null);
   const [musicaSilenciada, setMusicaSilenciada] = useState<boolean>(false);
   const [pantallaCompleta, setPantallaCompleta] = useState<boolean>(false);
@@ -196,7 +221,7 @@ export default function Ruleta() {
 
   const enviarRespuestaAlBackend = async (idPregunta: number, esCorrecta: boolean) => {
     try {
-      await fetch(`http://localhost:8000/api/v1/question/${idPregunta}/responder`, {
+      await fetch(`${API_BASE_URL}/api/v1/question/${idPregunta}/responder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ correcta: esCorrecta })
@@ -206,56 +231,72 @@ export default function Ruleta() {
     }
   };
 
-  const cambiarModo = (nuevoModo: Modo) => {
-    setModo(nuevoModo);
+  const siguienteTurno = () => {
     setPregunta(null);
     setOpcionesMezcladas([]);
     setResultado({ tipo: null, msg: '' });
     setOpcionSeleccionada(null);
-    setTimerActivo(false);
     setOpcionesOcultas([]);
-    setEsReto(false);
+    setEsRetoCorona(false);
+    setCategoriaRetada(null);
+  };
+
+  const cambiarModo = (nuevoModo: Modo) => {
+    setModo(nuevoModo);
+    siguienteTurno();
     if (nuevoModo === 'duelo') {
       setTurno(1);
-      setCoronas(Object.fromEntries(CATEGORIAS.map((c) => [c, null])));
+      setProgreso({
+        1: Object.fromEntries(CATEGORIAS.map((c) => [c, 0])),
+        2: Object.fromEntries(CATEGORIAS.map((c) => [c, 0])),
+      });
+      setCoronas({ 1: [], 2: [] });
       setRachaTurno({ 1: 0, 2: 0 });
       setComodinDuelo({ 1: false, 2: false });
       setGanadorDuelo(null);
+    } else if (nuevoModo === 'desafio') {
+      setTurnoDesafio(1);
+      setPreguntaNumeroDesafio(1);
+      setStatsDesafio({
+        1: { correctas: 0, tiempoTotal: 0 },
+        2: { correctas: 0, tiempoTotal: 0 }
+      });
+      setDesafioTerminado(false);
     }
   };
 
   const handleSpinClick = () => {
-    const bloqueado = modo === 'solo' ? (juegoTerminado || !!bloqueadoHasta) : !!ganadorDuelo;
-    if (!mustSpin && !bloqueado) {
+    const bloqueado = modo === 'solo' ? (juegoTerminado || !!bloqueadoHasta) : modo === 'duelo' ? !!ganadorDuelo : desafioTerminado;
+    if (!mustSpin && !bloqueado && !pregunta) {
       reproducirAleatorio(SONIDOS_GIRO);
       setPrizeNumber(Math.floor(Math.random() * data.length));
       setMustSpin(true);
-      setPregunta(null);
-      setOpcionesMezcladas([]);
-      setResultado({ tipo: null, msg: '' });
-      setOpcionSeleccionada(null);
-      setTimerActivo(false);
+      siguienteTurno();
       setComodinUsado(false);
-      setOpcionesOcultas([]);
-      setEsReto(false);
       ticReproducidoRef.current = false;
     }
   };
 
+  const iniciarRetoCorona = (cat: string) => {
+    if (ganadorDuelo) return;
+    setEsRetoCorona(true);
+    setCategoriaRetada(cat);
+    cargarPregunta(cat);
+  };
+
   const handleStopSpinning = async () => {
     setMustSpin(false);
-    const categoriaElegida = data[prizeNumber].option;
+    const opcionTexto = data[prizeNumber].option;
+    const categoriaElegida = CATEGORIAS.find((c) => opcionTexto.includes(c)) || opcionTexto;
+    cargarPregunta(categoriaElegida);
+  };
 
-    if (modo === 'duelo') {
-      const dueno = coronas[categoriaElegida];
-      setEsReto(dueno !== null && dueno !== turno);
-    }
-
+  const cargarPregunta = async (categoriaElegida: string) => {
     setCargando(true);
     try {
       let dataPregunta: any = null;
       for (let intento = 0; intento < 5; intento++) {
-        const response = await fetch(`http://localhost:8000/api/v1/question/random/${categoriaElegida}`);
+        const response = await fetch(`${API_BASE_URL}/api/v1/question/random/${categoriaElegida}`);
         if (!response.ok) throw new Error("Error");
         const candidata = await response.json();
         if (!preguntasRecientesRef.current.includes(candidata.id)) {
@@ -278,8 +319,6 @@ export default function Ruleta() {
       setCargando(false);
     }
   };
-
-  // ================= MODO 1 JUGADOR =================
 
   const perderVida = () => {
     setVidas((v) => {
@@ -340,8 +379,6 @@ export default function Ruleta() {
     }
   };
 
-  // ================= MODO 1vs1 =================
-
   const usarComodinDuelo = () => {
     if (!comodinDuelo[turno] || comodinUsado || !pregunta) return;
     const incorrectas = opcionesMezcladas.filter((o) => o !== pregunta.respuesta_correcta);
@@ -357,14 +394,49 @@ export default function Ruleta() {
     const esCorrecta = opcion === pregunta.respuesta_correcta;
     enviarRespuestaAlBackend(pregunta.id, esCorrecta);
 
-    const categoriaActual = pregunta.categoria as string;
     const jugadorActual = turno;
+    const oponente = jugadorActual === 1 ? 2 : 1;
+    const categoriaActual = esRetoCorona ? categoriaRetada! : pregunta.categoria;
 
     if (esCorrecta) {
       reproducirAleatorio(SONIDOS_CORRECTO);
-      const nuevaCoronas = { ...coronas, [categoriaActual]: jugadorActual };
-      setCoronas(nuevaCoronas);
-      lanzarConfettiCorona();
+      let tieneCorona = coronas[jugadorActual].includes(categoriaActual);
+
+      if (esRetoCorona) {
+        if (!tieneCorona) {
+          setCoronas((prev) => ({
+            ...prev,
+            [jugadorActual]: [...prev[jugadorActual], categoriaActual],
+            [oponente]: prev[oponente].filter((c) => c !== categoriaActual),
+          }));
+        }
+      } else {
+        const nivelActual = progreso[jugadorActual][categoriaActual] || 0;
+        if (nivelActual === 2 && !tieneCorona) {
+          lanzarConfettiCorona();
+          setCoronas((prev) => ({
+            ...prev,
+            [jugadorActual]: [...prev[jugadorActual], categoriaActual],
+          }));
+          setProgreso((prev) => ({
+            ...prev,
+            [jugadorActual]: { ...prev[jugadorActual], [categoriaActual]: 3 },
+          }));
+        } else if (nivelActual < 2) {
+          setProgreso((prev) => ({
+            ...prev,
+            [jugadorActual]: { ...prev[jugadorActual], [categoriaActual]: nivelActual + 1 },
+          }));
+        }
+      }
+
+      const totalCoronasActualizadas = [...coronas[jugadorActual], ...(esRetoCorona && !coronas[jugadorActual].includes(categoriaActual) ? [categoriaActual] : [])];
+      if (totalCoronasActualizadas.length >= 7) {
+        setGanadorDuelo(jugadorActual);
+        lanzarConfettiVictoria();
+        setResultado({ tipo: 'correcto', msg: `🏆 ¡Jugador ${jugadorActual} ganó el duelo!` });
+        return;
+      }
 
       const nuevaRacha = rachaTurno[jugadorActual] + 1;
       setRachaTurno((r) => ({ ...r, [jugadorActual]: nuevaRacha }));
@@ -373,25 +445,69 @@ export default function Ruleta() {
         reproducir(SONIDO_COMODIN);
       }
 
-      const gano = CATEGORIAS.every((c) => nuevaCoronas[c] === jugadorActual);
-      if (gano) {
-        setGanadorDuelo(jugadorActual);
-        lanzarConfettiVictoria();
-        setResultado({ tipo: 'correcto', msg: `🏆 ¡Jugador ${jugadorActual} ganó el duelo!` });
-        return;
-      }
-
       setResultado({
         tipo: 'correcto',
-        msg: esReto
-          ? `¡Jugador ${jugadorActual} le quitó la corona de ${categoriaActual}!`
-          : `¡Jugador ${jugadorActual} ganó la corona de ${categoriaActual}! Seguís jugando.`
+        msg: esRetoCorona
+          ? `¡Robaste la corona de ${categoriaActual}! ¡Seguís jugando!`
+          : `¡Correcto! Avanzás en ${categoriaActual}. ¡Mantenés el turno y volvés a girar!`
       });
     } else {
       reproducirAleatorio(SONIDOS_INCORRECTO);
       setRachaTurno((r) => ({ ...r, [jugadorActual]: 0 }));
-      setResultado({ tipo: 'incorrecto', msg: `Jugador ${jugadorActual} falló. Turno para el Jugador ${jugadorActual === 1 ? 2 : 1}.` });
-      setTurno(jugadorActual === 1 ? 2 : 1);
+
+      if (esRetoCorona || (progreso[jugadorActual][categoriaActual] === 2)) {
+        setProgreso((prev) => ({
+          ...prev,
+          [jugadorActual]: { ...prev[jugadorActual], [categoriaActual]: 0 },
+        }));
+      }
+
+      setResultado({ 
+        tipo: 'incorrecto', 
+        msg: `Fallaste. Turno pasa al Jugador ${oponente}.` 
+      });
+      setTurno(oponente);
+    }
+  };
+
+  const verificarRespuestaDesafio = (opcion: string) => {
+    if (opcionSeleccionada || !tiempoInicio || tiempoRestante === 0 || desafioTerminado) return;
+    setTimerActivo(false);
+    setOpcionSeleccionada(opcion);
+    const tiempoTardado = (Date.now() - tiempoInicio) / 1000;
+    const esCorrecta = opcion === pregunta.respuesta_correcta;
+    enviarRespuestaAlBackend(pregunta.id, esCorrecta);
+
+    const jugadorActual = turnoDesafio;
+    
+    setStatsDesafio((prev) => {
+      const actual = prev[jugadorActual];
+      return {
+        ...prev,
+        [jugadorActual]: {
+          correctas: actual.correctas + (esCorrecta ? 1 : 0),
+          tiempoTotal: Number((actual.tiempoTotal + tiempoTardado).toFixed(2))
+        }
+      };
+    });
+
+    if (esCorrecta) {
+      reproducirAleatorio(SONIDOS_CORRECTO);
+      setResultado({ tipo: 'correcto', msg: `¡Correcto! (+${tiempoTardado.toFixed(1)}s)` });
+    } else {
+      reproducirAleatorio(SONIDOS_INCORRECTO);
+      setResultado({ tipo: 'incorrecto', msg: `Incorrecto. La respuesta era: ${pregunta.respuesta_correcta}` });
+    }
+  };
+
+  const avanzarSiguientePasoDesafio = () => {
+    if (preguntaNumeroDesafio >= 14) {
+      setDesafioTerminado(true);
+      lanzarConfettiVictoria();
+    } else {
+      setPreguntaNumeroDesafio((p) => p + 1);
+      setTurnoDesafio((t) => (t === 1 ? 2 : 1));
+      siguienteTurno();
     }
   };
 
@@ -403,49 +519,61 @@ export default function Ruleta() {
     if (modo === 'solo') {
       setRachaIncorrectas((r) => r + 1);
       setRachaCorrectas(0);
-      setResultado({ tipo: 'incorrecto', msg: "¡Se te terminó el tiempo! ⏱️" });
+      setResultado({ tipo: 'incorrecto', msg: "¡Tiempo agotado! ⏱️" });
       if (pregunta) enviarRespuestaAlBackend(pregunta.id, false);
       perderVida();
-    } else {
+    } else if (modo === 'duelo') {
       if (pregunta) enviarRespuestaAlBackend(pregunta.id, false);
-      setRachaTurno((r) => ({ ...r, [turno]: 0 }));
-      setResultado({ tipo: 'incorrecto', msg: `¡Se le acabó el tiempo al Jugador ${turno}! Turno para el Jugador ${turno === 1 ? 2 : 1}.` });
-      setTurno(turno === 1 ? 2 : 1);
+      const jugadorActual = turno;
+      const oponente = jugadorActual === 1 ? 2 : 1;
+      setRachaTurno((r) => ({ ...r, [jugadorActual]: 0 }));
+      setResultado({ tipo: 'incorrecto', msg: `¡Se agotó el tiempo! Turno para Jugador ${oponente}.` });
+      setTurno(oponente);
+    } else if (modo === 'desafio') {
+      if (pregunta) enviarRespuestaAlBackend(pregunta.id, false);
+      setResultado({ tipo: 'incorrecto', msg: "¡Se agotó el tiempo! 0 aciertos sumados." });
     }
   };
 
   const verificarRespuesta = (opcion: string) => {
     if (modo === 'solo') verificarRespuestaSolo(opcion);
-    else verificarRespuestaDuelo(opcion);
+    else if (modo === 'duelo') verificarRespuestaDuelo(opcion);
+    else if (modo === 'desafio') verificarRespuestaDesafio(opcion);
   };
 
   const reiniciarDuelo = () => cambiarModo('duelo');
 
   const BarraSuperior = (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+    <div className="barra-superior-animada">
       <button
         onClick={() => cambiarModo('solo')}
-        style={{ padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold', backgroundColor: modo === 'solo' ? '#4a90e2' : '#ddd', color: modo === 'solo' ? '#fff' : '#333' }}
+        className={`nav-btn ${modo === 'solo' ? 'active' : ''}`}
       >
         👤 1 Jugador
       </button>
       <button
         onClick={() => cambiarModo('duelo')}
-        style={{ padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold', backgroundColor: modo === 'duelo' ? '#4a90e2' : '#ddd', color: modo === 'duelo' ? '#fff' : '#333' }}
+        className={`nav-btn ${modo === 'duelo' ? 'active' : ''}`}
       >
         ⚔️ 1 vs 1
       </button>
       <button
+        onClick={() => cambiarModo('desafio')}
+        className={`nav-btn ${modo === 'desafio' ? 'active' : ''}`}
+      >
+        🎯 Desafío (14 Preg.)
+      </button>
+      <button
         onClick={() => setMusicaSilenciada((m) => !m)}
         title={musicaSilenciada ? 'Activar música' : 'Silenciar música'}
-        style={{ padding: '10px 14px', borderRadius: '8px', border: 'none', cursor: 'pointer', backgroundColor: '#333', color: '#fff', fontSize: '16px' }}
+        className="icon-btn"
       >
         {musicaSilenciada ? '🔇' : '🔊'}
       </button>
       <button
         onClick={alternarPantallaCompleta}
         title="Pantalla completa"
-        style={{ padding: '10px 14px', borderRadius: '8px', border: 'none', cursor: 'pointer', backgroundColor: '#333', color: '#fff', fontSize: '16px' }}
+        className="icon-btn"
       >
         {pantallaCompleta ? '🡼' : '⛶'}
       </button>
@@ -454,148 +582,460 @@ export default function Ruleta() {
 
   if (modo === 'solo' && bloqueadoHasta) {
     return (
-      <div>
+      <div className="game-container">
         {BarraSuperior}
-        <div style={{ textAlign: 'center', marginTop: '40px', color: 'white' }}>
-          <h2>🔒 Perdiste tus 3 vidas</h2>
+        <div className="card-bloqueo">
+          <h2>🔒 Has agotado tus vidas</h2>
           <p style={{ fontSize: '18px' }}>Podés volver a jugar en:</p>
-          <div style={{ fontSize: '48px', fontWeight: 'bold', color: '#ffdd57' }}>{tiempoRestanteBloqueo}</div>
-          <p style={{ marginTop: '20px' }}>Puntaje de esa partida: <strong>{puntaje}</strong></p>
-          <p>Récord personal: <strong>{record}</strong></p>
+          <div className="cronometro-bloqueo">{tiempoRestanteBloqueo}</div>
+          <p style={{ marginTop: '20px' }}>Puntaje: <strong>{puntaje}</strong></p>
+          <p>Récord: <strong>{record}</strong></p>
         </div>
       </div>
     );
   }
 
   return (
-    <div>
+    <div className="game-container">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap');
+
+        .game-container {
+          min-height: 100vh;
+          background: linear-gradient(135deg, #a855f7 0%, #6366f1 50%, #3b82f6 100%);
+          background-size: 200% 200%;
+          animation: gradientShift 12s ease infinite;
+          padding: 24px;
+          font-family: 'Fredoka', system-ui, sans-serif;
+          color: #1e293b;
+        }
+
+        @keyframes gradientShift {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+
+        .barra-superior-animada {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 14px;
+          margin-bottom: 25px;
+          flex-wrap: wrap;
+          background: rgba(255, 255, 255, 0.25);
+          backdrop-filter: blur(12px);
+          padding: 12px 24px;
+          border-radius: 20px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+          border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .nav-btn {
+          padding: 10px 24px;
+          border-radius: 14px;
+          border: none;
+          cursor: pointer;
+          font-weight: 600;
+          font-size: 16px;
+          background: rgba(255, 255, 255, 0.4);
+          color: #fff;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        .nav-btn.active {
+          background: #ffffff;
+          color: #4f46e5;
+          transform: scale(1.05);
+          box-shadow: 0 6px 20px rgba(255,255,255,0.4);
+        }
+
+        .nav-btn:hover {
+          transform: translateY(-2px);
+          background: rgba(255, 255, 255, 0.7);
+          color: #312e81;
+        }
+
+        .icon-btn {
+          padding: 10px 14px;
+          border-radius: 14px;
+          border: none;
+          cursor: pointer;
+          background: rgba(255, 255, 255, 0.3);
+          color: #fff;
+          font-size: 16px;
+          transition: all 0.2s ease;
+        }
+        .icon-btn:hover {
+          background: rgba(255, 255, 255, 0.7);
+          transform: translateY(-2px);
+        }
+
+        .ruleta-glow-wrapper {
+          position: relative;
+          padding: 12px;
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 50%;
+          box-shadow: 0 0 30px rgba(255, 255, 255, 0.4), inset 0 0 20px rgba(255, 255, 255, 0.3);
+          backdrop-filter: blur(5px);
+          animation: floatPulse 4s ease-in-out infinite;
+        }
+
+        @keyframes floatPulse {
+          0%, 100% { transform: translateY(0) scale(1); }
+          50% { transform: translateY(-6px) scale(1.01); }
+        }
+
+        .capibara-img {
+          width: 190px;
+          max-height: 230px;
+          object-fit: contain;
+          filter: drop-shadow(0 12px 24px rgba(0,0,0,0.25));
+          animation: bounceGentle 3s ease-in-out infinite;
+        }
+
+        @keyframes bounceGentle {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-8px); }
+        }
+
+        .main-card-game {
+          background: rgba(255, 255, 255, 0.92);
+          backdrop-filter: blur(16px);
+          border-radius: 24px;
+          padding: 28px;
+          box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+          border: 2px solid rgba(255, 255, 255, 0.8);
+          transition: all 0.3s ease;
+        }
+
+        .opcion-btn {
+          padding: 16px;
+          text-align: left;
+          border-radius: 14px;
+          cursor: pointer;
+          font-size: 16px;
+          font-weight: 600;
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        }
+        .opcion-btn:not(:disabled):hover {
+          transform: translateY(-3px) scale(1.01);
+          box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+        }
+
+        .girar-btn {
+          padding: 16px 40px;
+          font-size: 20px;
+          border-radius: 16px;
+          font-weight: 700;
+          letter-spacing: 0.5px;
+          background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+          color: white;
+          border: none;
+          box-shadow: 0 8px 24px rgba(34,197,94,0.4);
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+        .girar-btn:not(:disabled):hover {
+          transform: translateY(-4px) scale(1.03);
+          box-shadow: 0 12px 30px rgba(34,197,94,0.6);
+        }
+        .girar-btn:disabled {
+          background: #94a3b8;
+          cursor: not-allowed;
+          box-shadow: none;
+          transform: none;
+        }
+
+        .card-bloqueo {
+          text-align: center;
+          margin-top: 40px;
+          color: #1e293b;
+          background: rgba(255, 255, 255, 0.9);
+          padding: 40px;
+          border-radius: 24px;
+          max-width: 500px;
+          margin: 40px auto;
+          box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+        }
+        .cronometro-bloqueo {
+          font-size: 52px;
+          font-weight: bold;
+          color: #e11d48;
+          text-shadow: 0 4px 12px rgba(225,29,72,0.2);
+        }
+
+        .player-panel {
+          background: rgba(255, 255, 255, 0.85);
+          backdrop-filter: blur(12px);
+          padding: 22px;
+          border-radius: 22px;
+          width: 240px;
+          color: #1e293b;
+          border: 2px solid rgba(255,255,255,0.6);
+          box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+          transition: all 0.3s ease;
+        }
+        .player-panel.active-turn {
+          border: 2px solid #6366f1;
+          box-shadow: 0 0 25px rgba(99, 102, 241, 0.4);
+          transform: scale(1.02);
+        }
+      `}</style>
       {BarraSuperior}
 
-      <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-start', gap: '50px', marginTop: '10px', flexWrap: 'wrap', padding: '0 16px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+      <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-start', gap: '30px', marginTop: '10px', flexWrap: 'wrap', padding: '0 16px' }}>
+        
+        {/* Panel Jugador 1 (Modo Duelo) */}
+        {modo === 'duelo' && (
+          <div className={`player-panel ${turno === 1 ? 'active-turn' : ''}`}>
+            <h4 style={{ margin: '0 0 15px 0', color: '#4f46e5', fontSize: '18px', textAlign: 'center' }}>👤 Jugador 1 {turno === 1 && '◀'}</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {CATEGORIAS.map((cat) => {
+                const nivel = progreso[1][cat] || 0;
+                const tieneCorona = coronas[1].includes(cat);
+                const oponenteTieneCorona = coronas[2].includes(cat);
+                return (
+                  <div key={cat} style={{ fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', padding: '8px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    <span>{STICKERS_CATEGORIA[cat]} {cat}</span>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{tieneCorona ? '👑' : `${nivel}/3`}</span>
+                      {nivel === 2 && !tieneCorona && oponenteTieneCorona && turno === 1 && !mustSpin && !pregunta && (
+                        <button onClick={() => iniciarRetoCorona(cat)} style={{ fontSize: '10px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', padding: '4px 8px', fontWeight: 'bold' }}>
+                          ⚔️ Reto
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '22px' }}>
 
           {modo === 'solo' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center' }}>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <div style={{ fontSize: '18px', backgroundColor: '#333', color: '#fff', padding: '5px 15px', borderRadius: '15px' }}>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ fontSize: '18px', backgroundColor: 'rgba(255,255,255,0.9)', color: '#1e293b', padding: '8px 18px', borderRadius: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.08)', fontWeight: '600' }}>
                   {Array.from({ length: VIDAS_INICIALES }).map((_, i) => (
                     <span key={i}>{i < vidas ? '❤️' : '🖤'}</span>
                   ))}
                 </div>
-                <div style={{ fontSize: '15px', fontWeight: 'bold', backgroundColor: '#333', color: '#fff', padding: '5px 15px', borderRadius: '15px' }}>
+                <div style={{ fontSize: '15px', fontWeight: 'bold', backgroundColor: 'rgba(255,255,255,0.9)', color: '#1e293b', padding: '8px 18px', borderRadius: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.08)' }}>
                   🏆 {puntaje} | Récord: {record}
                 </div>
               </div>
-              <div style={{ fontSize: '15px', fontWeight: 'bold', backgroundColor: '#333', color: '#fff', padding: '5px 15px', borderRadius: '15px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 'bold', backgroundColor: 'rgba(255,255,255,0.9)', color: '#1e293b', padding: '6px 16px', borderRadius: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.08)' }}>
                 🔥 Racha: {rachaCorrectas} | ❌ Errores: {rachaIncorrectas}
               </div>
               {timerActivo && (
-                <div style={{ fontSize: '20px', fontWeight: 'bold', backgroundColor: tiempoRestante <= 10 ? '#e74c3c' : '#f1c40f', color: tiempoRestante <= 10 ? '#fff' : '#000', padding: '8px 20px', borderRadius: '15px', minWidth: '70px', textAlign: 'center' }}>
+                <div style={{ fontSize: '22px', fontWeight: 'bold', backgroundColor: tiempoRestante <= 10 ? '#ef4444' : '#f59e0b', color: '#fff', padding: '8px 24px', borderRadius: '20px', textAlign: 'center', boxShadow: '0 4px 15px rgba(0,0,0,0.15)' }}>
                   ⏱️ {tiempoRestante}s
                 </div>
               )}
               {comodinDisponible && (
-                <button onClick={usarComodinSolo} style={{ padding: '8px 16px', backgroundColor: '#8e44ad', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
+                <button onClick={usarComodinSolo} style={{ padding: '10px 20px', backgroundColor: '#a855f7', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 15px rgba(168,85,247,0.4)' }}>
                   🃏 Usar comodín (50/50)
                 </button>
               )}
             </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center', width: '100%' }}>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <div style={{ padding: '8px 16px', borderRadius: '15px', fontWeight: 'bold', backgroundColor: turno === 1 ? '#4a90e2' : '#ddd', color: turno === 1 ? '#fff' : '#333' }}>
-                  Turno: Jugador 1
-                </div>
-                <div style={{ padding: '8px 16px', borderRadius: '15px', fontWeight: 'bold', backgroundColor: turno === 2 ? '#4a90e2' : '#ddd', color: turno === 2 ? '#fff' : '#333' }}>
-                  Turno: Jugador 2
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center', maxWidth: '340px' }}>
-                {CATEGORIAS.map((cat) => (
-                  <div key={cat} style={{
-                    padding: '4px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold',
-                    backgroundColor: coronas[cat] === 1 ? '#4a90e2' : coronas[cat] === 2 ? '#e74c3c' : '#eee',
-                    color: coronas[cat] ? '#fff' : '#333'
-                  }}>
-                    {coronas[cat] ? '👑' : ''} {cat}
-                  </div>
-                ))}
+          ) : modo === 'duelo' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center' }}>
+              <div style={{ padding: '10px 26px', borderRadius: '20px', fontWeight: 'bold', backgroundColor: '#4f46e5', color: '#fff', boxShadow: '0 4px 15px rgba(79,70,229,0.4)', fontSize: '16px' }}>
+                Turno Actual: Jugador {turno}
               </div>
 
               {timerActivo && (
-                <div style={{ fontSize: '20px', fontWeight: 'bold', backgroundColor: tiempoRestante <= 10 ? '#e74c3c' : '#f1c40f', color: tiempoRestante <= 10 ? '#fff' : '#000', padding: '8px 20px', borderRadius: '15px', minWidth: '70px', textAlign: 'center' }}>
+                <div style={{ fontSize: '22px', fontWeight: 'bold', backgroundColor: tiempoRestante <= 10 ? '#ef4444' : '#f59e0b', color: '#fff', padding: '8px 24px', borderRadius: '20px', textAlign: 'center' }}>
                   ⏱️ {tiempoRestante}s
                 </div>
               )}
               {comodinDuelo[turno] && (
-                <button onClick={usarComodinDuelo} style={{ padding: '8px 16px', backgroundColor: '#8e44ad', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
+                <button onClick={usarComodinDuelo} style={{ padding: '10px 20px', backgroundColor: '#a855f7', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
                   🃏 Jugador {turno}: usar comodín (50/50)
                 </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center' }}>
+              <div style={{ padding: '10px 26px', borderRadius: '20px', fontWeight: 'bold', backgroundColor: '#0284c7', color: '#fff', boxShadow: '0 4px 15px rgba(2,132,199,0.4)', fontSize: '16px' }}>
+                🎯 Desafío | Pregunta {preguntaNumeroDesafio} de 14 (Turno Jugador {turnoDesafio})
+              </div>
+              {timerActivo && (
+                <div style={{ fontSize: '22px', fontWeight: 'bold', backgroundColor: tiempoRestante <= 10 ? '#ef4444' : '#f59e0b', color: '#fff', padding: '8px 24px', borderRadius: '20px', textAlign: 'center' }}>
+                  ⏱️ {tiempoRestante}s
+                </div>
               )}
             </div>
           )}
 
           {(modo === 'solo' && juegoTerminado) ? (
-            <div style={{ textAlign: 'center', color: 'white' }}>
+            <div className="card-bloqueo">
               <h2>💀 Perdiste tus 3 vidas</h2>
               <p>Puntaje final: <strong>{puntaje}</strong></p>
               <p>Récord: <strong>{record}</strong></p>
-              <p style={{ color: '#ffdd57', fontWeight: 'bold' }}>Podrás volver a jugar en {MINUTOS_BLOQUEO} minutos.</p>
             </div>
           ) : (modo === 'duelo' && ganadorDuelo) ? (
-            <div style={{ textAlign: 'center', color: 'white' }}>
+            <div className="card-bloqueo">
               <h2>🏆 ¡Jugador {ganadorDuelo} ganó el duelo!</h2>
-              <p>Reunió las {CATEGORIAS.length} coronas.</p>
-              <button onClick={reiniciarDuelo} style={{ padding: '10px 24px', backgroundColor: '#4a90e2', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>
+              <button onClick={reiniciarDuelo} className="girar-btn" style={{ marginTop: '15px' }}>
                 Jugar de nuevo
+              </button>
+            </div>
+          ) : (modo === 'desafio' && desafioTerminado) ? (
+            <div className="card-bloqueo" style={{ maxWidth: '600px' }}>
+              <h2>📊 Informe Final del Desafío</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-around', margin: '20px 0', gap: '15px' }}>
+                <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', flex: 1, border: '1px solid #cbd5e1' }}>
+                  <h3 style={{ color: '#4f46e5', margin: '0 0 10px 0' }}>Jugador 1</h3>
+                  <p>Aciertos: <strong>{statsDesafio[1].correctas} / 7</strong></p>
+                  <p>Tiempo Total: <strong>{statsDesafio[1].tiempoTotal}s</strong></p>
+                </div>
+                <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', flex: 1, border: '1px solid #cbd5e1' }}>
+                  <h3 style={{ color: '#0284c7', margin: '0 0 10px 0' }}>Jugador 2</h3>
+                  <p>Aciertos: <strong>{statsDesafio[2].correctas} / 7</strong></p>
+                  <p>Tiempo Total: <strong>{statsDesafio[2].tiempoTotal}s</strong></p>
+                </div>
+              </div>
+              <h3 style={{ color: '#16a34a', margin: '15px 0' }}>
+                {statsDesafio[1].correctas > statsDesafio[2].correctas ? "🏆 ¡Ganó el Jugador 1 por más aciertos!" :
+                 statsDesafio[2].correctas > statsDesafio[1].correctas ? "🏆 ¡Ganó el Jugador 2 por más aciertos!" :
+                 statsDesafio[1].tiempoTotal < statsDesafio[2].tiempoTotal ? "🏆 ¡Empate en aciertos! Gana Jugador 1 por velocidad." :
+                 statsDesafio[2].tiempoTotal < statsDesafio[1].tiempoTotal ? "🏆 ¡Empate en aciertos! Gana Jugador 2 por velocidad." :
+                 "🤝 ¡Empate total en aciertos y tiempo!"}
+              </h3>
+              <button onClick={() => cambiarModo('desafio')} className="girar-btn" style={{ marginTop: '15px', fontSize: '16px', padding: '12px 24px' }}>
+                Volver a Desafiar
               </button>
             </div>
           ) : (
             <>
-              <h2 style={{ color: 'white' }}>{modo === 'solo' ? '¡Girá la Ruleta!' : `Turno del Jugador ${turno}: ¡Girá la Ruleta!`}</h2>
-              {esReto && modo === 'duelo' && (
-                <div style={{ backgroundColor: '#f39c12', color: '#fff', padding: '6px 14px', borderRadius: '10px', fontWeight: 'bold' }}>
-                  ⚔️ ¡Reto por la corona!
+              <h2 style={{ color: '#ffffff', margin: '0', textShadow: '0 2px 10px rgba(0,0,0,0.2)', fontSize: '28px' }}>
+                {modo === 'solo' ? '¡Girá la Ruleta!' : modo === 'duelo' ? `Turno del Jugador ${turno}` : `Desafío - Jugador ${turnoDesafio}`}
+              </h2>
+              {esRetoCorona && (
+                <div style={{ backgroundColor: '#ea580c', color: '#fff', padding: '8px 18px', borderRadius: '14px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(234,88,12,0.3)' }}>
+                  ⚔️ Reto por la corona de {categoriaRetada}
                 </div>
               )}
-              <Wheel mustStartSpinning={mustSpin} prizeNumber={prizeNumber} data={data} onStopSpinning={handleStopSpinning} outerBorderColor="#ccc" outerBorderWidth={5} innerRadius={15} innerBorderColor="#ccc" innerBorderWidth={3} radiusLineColor="#fff" radiusLineWidth={2} />
-              <button onClick={handleSpinClick} disabled={mustSpin} style={{ padding: '12px 30px', fontSize: '18px', cursor: 'pointer', backgroundColor: mustSpin ? '#ccc' : '#4a90e2', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' }}>
-                {mustSpin ? 'Girando...' : '¡Girar Ruleta!'}
+
+              {/* RULETA 2D MEJORADA CON GLOW Y CAPIBARA ANIMADO */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '30px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                <div className="ruleta-glow-wrapper">
+                  <Wheel
+                    mustStartSpinning={mustSpin}
+                    prizeNumber={prizeNumber}
+                    data={data}
+                    onStopSpinning={handleStopSpinning}
+                    outerBorderColor="#ffffff"
+                    outerBorderWidth={8}
+                    innerRadius={25}
+                    innerBorderColor="#ffffff"
+                    innerBorderWidth={5}
+                    radiusLineWidth={3}
+                    radiusLineColor="#ffffff"
+                    fontSize={17}
+                    textColors={['#ffffff']}
+                  />
+                </div>
+                
+                <img 
+                  src="/capibara.png" 
+                  alt="Modo Capibara: Cero Estrés" 
+                  className="capibara-img" 
+                />
+              </div>
+
+              <button onClick={handleSpinClick} disabled={mustSpin || !!pregunta} className="girar-btn">
+                {mustSpin ? 'Girando ruleta...' : '¡Girar Ruleta!'}
               </button>
-              {cargando && <p style={{ color: 'white' }}>Cargando pregunta...</p>}
+              {cargando && <p style={{ color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>Cargando pregunta...</p>}
             </>
           )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: '300px', maxWidth: '450px', width: '100%', marginTop: '50px' }}>
-          {pregunta && !((modo === 'solo' && juegoTerminado) || (modo === 'duelo' && ganadorDuelo)) && (
-            <div style={{ padding: '20px', border: '1px solid #ddd', borderRadius: '12px', backgroundColor: '#f9f9f9', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <span style={{ backgroundColor: '#eee', padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>{pregunta.categoria}</span>
-                <span style={{ backgroundColor: '#ebd5ff', color: '#6b21a8', padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>Dificultad: {pregunta.dificultad}</span>
+        {/* Panel Jugador 2 (Modo Duelo) */}
+        {modo === 'duelo' && (
+          <div className={`player-panel ${turno === 2 ? 'active-turn' : ''}`}>
+            <h4 style={{ margin: '0 0 15px 0', color: '#4f46e5', fontSize: '18px', textAlign: 'center' }}>👤 Jugador 2 {turno === 2 && '◀'}</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {CATEGORIAS.map((cat) => {
+                const nivel = progreso[2][cat] || 0;
+                const tieneCorona = coronas[2].includes(cat);
+                const oponenteTieneCorona = coronas[1].includes(cat);
+                return (
+                  <div key={cat} style={{ fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', padding: '8px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    <span>{STICKERS_CATEGORIA[cat]} {cat}</span>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{tieneCorona ? '👑' : `${nivel}/3`}</span>
+                      {nivel === 2 && !tieneCorona && oponenteTieneCorona && turno === 2 && !mustSpin && !pregunta && (
+                        <button onClick={() => iniciarRetoCorona(cat)} style={{ fontSize: '10px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', padding: '4px 8px', fontWeight: 'bold' }}>
+                          ⚔️ Reto
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* CARD DE PREGUNTAS MODERNA Y FLUIDA */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: '320px', maxWidth: '450px', width: '100%', marginTop: '30px' }}>
+          {pregunta && !((modo === 'solo' && juegoTerminado) || (modo === 'duelo' && ganadorDuelo) || (modo === 'desafio' && desafioTerminado)) && (
+            <div className="main-card-game">
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <span style={{ backgroundColor: '#e0e7ff', padding: '6px 14px', borderRadius: '20px', fontSize: '14px', fontWeight: '700', color: '#3730a3' }}>
+                  {STICKERS_CATEGORIA[pregunta.categoria]} {pregunta.categoria}
+                </span>
+                <span style={{ backgroundColor: '#f3e8ff', color: '#7e22ce', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: '700' }}>
+                  Dificultad: {pregunta.dificultad}
+                </span>
               </div>
-              <h3 style={{ margin: '10px 0 20px 0', fontSize: '18px' }}>{pregunta.pregunta}</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <h3 style={{ margin: '12px 0 22px 0', fontSize: '20px', color: '#1e293b', fontWeight: '700', lineHeight: '1.4' }}>{pregunta.pregunta}</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {opcionesMezcladas.filter((o) => !opcionesOcultas.includes(o)).map((opcion, index) => {
                   const esSeleccionada = opcionSeleccionada === opcion;
                   const esCorrecta = opcion === pregunta.respuesta_correcta;
-                  let bg = '#fff';
-                  let bc = '#ccc';
+                  let bg = '#ffffff';
+                  let bc = '#e2e8f0';
+                  let colorTexto = '#1e293b';
                   if (opcionSeleccionada && esSeleccionada) {
-                    if (esCorrecta) { bg = '#d4edda'; bc = '#28a745'; }
-                    else { bg = '#f8d7da'; bc = '#dc3545'; }
+                    if (esCorrecta) { bg = '#dcfce7'; bc = '#22c55e'; colorTexto = '#166534'; }
+                    else { bg = '#fee2e2'; bc = '#ef4444'; colorTexto = '#991b1b'; }
                   }
                   return (
-                    <button key={index} onClick={() => verificarRespuesta(opcion)} disabled={!!opcionSeleccionada} style={{ padding: '12px', textAlign: 'left', backgroundColor: bg, border: `2px solid ${bc}`, borderRadius: '8px', cursor: opcionSeleccionada ? 'not-allowed' : 'pointer', fontSize: '15px' }}>
+                    <button key={index} onClick={() => verificarRespuesta(opcion)} disabled={!!opcionSeleccionada} className="opcion-btn" style={{ backgroundColor: bg, border: `2px solid ${bc}`, color: colorTexto }}>
                       {opcion}
                     </button>
                   );
                 })}
               </div>
+              
               {resultado.tipo && (
-                <div style={{ marginTop: '20px', padding: '12px', borderRadius: '8px', backgroundColor: resultado.tipo === 'correcto' ? '#d4edda' : '#f8d7da', color: resultado.tipo === 'correcto' ? '#155724' : '#721c24', fontWeight: 'bold', textAlign: 'center' }}>
-                  {resultado.msg}
+                <div style={{ marginTop: '22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{
+                    padding: '14px', borderRadius: '14px',
+                    backgroundColor: resultado.tipo === 'correcto' ? '#dcfce7' : '#fee2e2',
+                    color: resultado.tipo === 'correcto' ? '#166534' : '#991b1b',
+                    fontWeight: 'bold', textAlign: 'center', fontSize: '16px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+                  }}>
+                    {resultado.msg}
+                  </div>
+                  
+                  <button 
+                    onClick={modo === 'desafio' ? avanzarSiguientePasoDesafio : siguienteTurno}
+                    className="girar-btn"
+                    style={{ fontSize: '16px', padding: '14px' }}
+                  >
+                    ▶ Continuar / Siguiente
+                  </button>
                 </div>
               )}
             </div>
