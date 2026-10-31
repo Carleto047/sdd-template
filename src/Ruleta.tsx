@@ -7,7 +7,7 @@ const MINUTOS_BLOQUEO = 20;
 const CLAVE_BLOQUEO = 'preguntados_bloqueo_hasta';
 const CLAVE_RECORD = 'preguntados_record';
 
-// URL del backend desplegado en Render
+// URL del backend desplegado en Render (Verificado)
 const API_BASE_URL = 'https://preguntados-backend-ppdb.onrender.com';
 
 const PISTAS_MUSICA = ['/sounds/musica1.wav'];
@@ -291,32 +291,40 @@ export default function Ruleta() {
     cargarPregunta(categoriaElegida);
   };
 
+  // --- FUNCIÓN DE CARGA OPTIMIZADA CON REINTENTOS PARA RENDER ---
   const cargarPregunta = async (categoriaElegida: string) => {
     setCargando(true);
-    try {
-      let dataPregunta: any = null;
-      for (let intento = 0; intento < 5; intento++) {
+    let dataPregunta: any = null;
+    
+    // Intenta hasta 4 veces conectarse, esperando 2 segundos entre intentos si el servidor está despertando
+    for (let intento = 0; intento < 4; intento++) {
+      try {
         const response = await fetch(`${API_BASE_URL}/api/v1/question/random/${categoriaElegida}`);
-        if (!response.ok) throw new Error("Error");
-        const candidata = await response.json();
-        if (!preguntasRecientesRef.current.includes(candidata.id)) {
-          dataPregunta = candidata;
-          break;
+        if (response.ok) {
+          const candidata = await response.json();
+          if (candidata) {
+            dataPregunta = candidata;
+            break;
+          }
         }
-        dataPregunta = candidata;
+      } catch (err) {
+        console.warn(`Intento ${intento + 1} fallido, reconectando...`);
       }
-      preguntasRecientesRef.current = [dataPregunta.id, ...preguntasRecientesRef.current].slice(0, 15);
+      // Espera 2 segundos antes del próximo intento si el backend estaba dormido
+      await new Promise((res) => setTimeout(res, 2000));
+    }
 
+    setCargando(false);
+
+    if (dataPregunta) {
+      preguntasRecientesRef.current = [dataPregunta.id, ...preguntasRecientesRef.current].slice(0, 15);
       setPregunta(dataPregunta);
       setOpcionesMezcladas(mezclarOpciones(dataPregunta.opciones));
       setTiempoInicio(Date.now());
       setTiempoRestante(dataPregunta.tiempo_limite);
       setTimerActivo(true);
-    } catch (error) {
-      console.error(error);
-      setResultado({ tipo: 'incorrecto', msg: `No se encontraron preguntas.` });
-    } finally {
-      setCargando(false);
+    } else {
+      setResultado({ tipo: 'incorrecto', msg: 'El servidor está despertando. Vuelve a girar en unos segundos.' });
     }
   };
 
@@ -953,7 +961,7 @@ export default function Ruleta() {
               <button onClick={handleSpinClick} disabled={mustSpin || !!pregunta} className="girar-btn">
                 {mustSpin ? 'Girando ruleta...' : '¡Girar Ruleta!'}
               </button>
-              {cargando && <p style={{ color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>Cargando pregunta...</p>}
+              {cargando && <p style={{ color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>Despertando servidor y cargando pregunta...</p>}
             </>
           )}
         </div>
