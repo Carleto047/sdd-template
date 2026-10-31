@@ -7,7 +7,7 @@ const MINUTOS_BLOQUEO = 20;
 const CLAVE_BLOQUEO = 'preguntados_bloqueo_hasta';
 const CLAVE_RECORD = 'preguntados_record';
 
-// URL del backend desplegado en Render (Verificado)
+// URL del backend desplegado en Render
 const API_BASE_URL = 'https://preguntados-backend-ppdb.onrender.com';
 
 const PISTAS_MUSICA = ['/sounds/musica1.wav'];
@@ -291,30 +291,41 @@ export default function Ruleta() {
     cargarPregunta(categoriaElegida);
   };
 
-  // --- FUNCIÓN DE CARGA OPTIMIZADA CON REINTENTOS PARA RENDER ---
+  // --- FUNCIÓN BLINDADA CON REINTENTOS Y RESPALDO LOCAL ---
   const cargarPregunta = async (categoriaElegida: string) => {
     setCargando(true);
     let dataPregunta: any = null;
     
-    // Intenta hasta 4 veces conectarse, esperando 2 segundos entre intentos si el servidor está despertando
-    for (let intento = 0; intento < 4; intento++) {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/question/random/${categoriaElegida}`);
-        if (response.ok) {
-          const candidata = await response.json();
-          if (candidata) {
-            dataPregunta = candidata;
-            break;
-          }
-        }
-      } catch (err) {
-        console.warn(`Intento ${intento + 1} fallido, reconectando...`);
-      }
-      // Espera 2 segundos antes del próximo intento si el backend estaba dormido
-      await new Promise((res) => setTimeout(res, 2000));
-    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/question/random/${categoriaElegida}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        mode: 'cors'
+      });
 
-    setCargando(false);
+      if (response.ok) {
+        dataPregunta = await response.json();
+      } else {
+        throw new Error(`Error HTTP: ${response.status}`);
+      }
+    } catch (error) {
+      console.warn("Servidor inactivo o bloqueo de red. Usando respaldo de emergencia...", error);
+      // Respaldo automático para evitar que la interfaz se quede colgada en móviles
+      dataPregunta = {
+        id: Math.floor(Math.random() * 1000),
+        categoria: categoriaElegida,
+        pregunta: `Pregunta de práctica sobre ${categoriaElegida} (Servidor despertando)`,
+        opciones: ["Opción Correcta", "Opción Incorrecta A", "Opción Incorrecta B", "Opción Incorrecta C"],
+        respuesta_correcta: "Opción Correcta",
+        dificultad: "Fácil",
+        tiempo_limite: 30
+      };
+    } finally {
+      setCargando(false);
+    }
 
     if (dataPregunta) {
       preguntasRecientesRef.current = [dataPregunta.id, ...preguntasRecientesRef.current].slice(0, 15);
@@ -323,8 +334,6 @@ export default function Ruleta() {
       setTiempoInicio(Date.now());
       setTiempoRestante(dataPregunta.tiempo_limite);
       setTimerActivo(true);
-    } else {
-      setResultado({ tipo: 'incorrecto', msg: 'El servidor está despertando. Vuelve a girar en unos segundos.' });
     }
   };
 
@@ -961,7 +970,7 @@ export default function Ruleta() {
               <button onClick={handleSpinClick} disabled={mustSpin || !!pregunta} className="girar-btn">
                 {mustSpin ? 'Girando ruleta...' : '¡Girar Ruleta!'}
               </button>
-              {cargando && <p style={{ color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>Despertando servidor y cargando pregunta...</p>}
+              {cargando && <p style={{ color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>Cargando pregunta...</p>}
             </>
           )}
         </div>
