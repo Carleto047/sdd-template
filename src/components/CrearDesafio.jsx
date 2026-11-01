@@ -1,72 +1,91 @@
 import React, { useState } from "react";
-import { crearDesafio } from "../services/desafioService";
+import { crearPartidaApi } from "../services/desafioService";
 
-export default function CrearDesafio({ categoriaSeleccionada }) {
+export default function CrearDesafio({ onPartidaCreada }) {
   const [nombre, setNombre] = useState("");
-  const [enlaceGenerado, setEnlaceGenerado] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [categoria, setCategoria] = useState("Geografía");
+  const [tipoModo, setTipoModo] = useState("1v1");
+  const [datosSala, setDatosSala] = useState(null);
+  const [error, setError] = useState("");
 
   const handleCrear = async (e) => {
     e.preventDefault();
-    if (!nombre.trim()) return alert("Por favor ingresa tu nombre");
-    
-    setLoading(true);
+    if (!nombre.trim()) {
+      setError("Por favor ingresa tu nombre.");
+      return;
+    }
     try {
-      const data = await crearDesafio(nombre, categoriaSeleccionada || "Cultura General");
-      // Construye el enlace completo basado en tu aplicación web actual
-      const urlCompleta = `${window.location.origin}/desafio/${data.desafio_id}?jugador1=${encodeURIComponent(nombre)}`;
-      setEnlaceGenerado(urlCompleta);
-    } catch (error) {
-      alert("Hubo un error al armar el desafío. Asegúrate de que haya al menos 14 preguntas en la categoría.");
-    } finally {
-      setLoading(false);
+      setError("");
+      const resultado = await crearPartidaApi(nombre, categoria, tipoModo);
+      setDatosSala(resultado);
+      if (onPartidaCreada) onPartidaCreada(resultado);
+    } catch (err) {
+      setError("No se pudo crear la sala. Intenta nuevamente.");
     }
   };
 
   return (
-    <div className="p-6 max-w-md mx-auto bg-white rounded-xl shadow-md space-y-4">
-      <h2 className="text-2xl font-bold text-center text-indigo-600">Crear Desafío 1vs1</h2>
-      <p className="text-gray-600 text-center">Categoría: <b>{categoriaSeleccionada || "Cultura General"}</b></p>
-      
-      {!enlaceGenerado ? (
-        <form onSubmit={handleCrear} className="space-y-4">
+    <div style={{ padding: "20px", maxWidth: "500px", margin: "auto", background: "#fff", borderRadius: "10px", boxShadow: "0 4px 10px rgba(0,0,0,0.1)" }}>
+      <h2>Crear Partida Multijugador</h2>
+      {error && <p style={{ color: "red" }}>{error}</p>}
+
+      {!datosSala ? (
+        <form onSubmit={handleCrear} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Tu Nombre (Jugador 1):</label>
-            <input
-              type="text"
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm"
-              placeholder="Ej. Carlos"
-              required
+            <label>Tu Nombre:</label>
+            <input 
+              type="text" 
+              value={nombre} 
+              onChange={(e) => setNombre(e.target.value)} 
+              placeholder="Ej: Carlos"
+              style={{ width: "100%", padding: "8px", marginTop: "5px" }}
             />
           </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-indigo-600 text-white p-2 rounded-md hover:bg-indigo-700 transition"
-          >
-            {loading ? "Generando 14 preguntas fijas..." : "Generar Enlace de Desafío"}
+
+          <div>
+            <label>Categoría:</label>
+            <select value={categoria} onChange={(e) => setCategoria(e.target.value)} style={{ width: "100%", padding: "8px", marginTop: "5px" }}>
+              <option value="Geografía">Geografía</option>
+              <option value="Ciencia">Ciencia</option>
+              <option value="Historia">Historia</option>
+              <option value="Arte">Arte</option>
+              <option value="Deportes">Deportes</option>
+              <option value="Entretenimiento">Entretenimiento</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Modo de Juego:</label>
+            <select value={tipoModo} onChange={(e) => setTipoModo(e.target.value)} style={{ width: "100%", padding: "8px", marginTop: "5px" }}>
+              <option value="1v1">Modo 1v1 (Por turnos - Si fallas, cedes el turno)</option>
+              <option value="desafio">Modo Desafío (Simultáneo - Mismas preguntas, gana por aciertos y menor tiempo con reporte)</option>
+            </select>
+          </div>
+
+          <button type="submit" style={{ padding: "10px", background: "#4f46e5", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}>
+            Generar Sala y Enlace
           </button>
         </form>
       ) : (
-        <div className="space-y-3 bg-gray-50 p-4 rounded-md">
-          <p className="text-green-600 font-semibold text-center">¡Desafío creado con éxito!</p>
-          <p className="text-xs text-gray-500">Comparte este enlace con tu amigo para que juegue las mismas 14 preguntas:</p>
-          <input
-            type="text"
-            readOnly
-            value={enlaceGenerado}
-            className="w-full p-2 text-sm bg-white border border-gray-300 rounded"
-          />
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(enlaceGenerado);
-              alert("¡Enlace copiado al portapapeles!");
-            }}
-            className="w-full bg-green-600 text-white p-2 rounded-md hover:bg-green-700 transition"
+        <div style={{ textAlign: "center", background: "#f3f4f6", padding: "15px", borderRadius: "8px" }}>
+          <h3>¡Sala Creada con Éxito!</h3>
+          <p>Comparte este código o enlace con tu oponente en su celular:</p>
+          <h2 style={{ color: "#2563eb", letterSpacing: "2px" }}>{datosSala.codigo_sala}</h2>
+          
+          <div style={{ margin: "15px 0" }}>
+            <input 
+              type="text" 
+              readOnly 
+              value={datosSala.enlace_invitacion} 
+              style={{ width: "100%", padding: "8px", textAlign: "center", fontSize: "12px" }}
+            />
+          </div>
+
+          <button 
+            onClick={() => navigator.clipboard.writeText(datosSala.enlace_invitacion)}
+            style={{ padding: "8px 15px", background: "#10b981", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
           >
-            Copiar Enlace
+            Copiar Enlace de Invitación
           </button>
         </div>
       )}

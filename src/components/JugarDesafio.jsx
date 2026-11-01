@@ -1,137 +1,186 @@
-import React, { useEffect, useState } from "react";
-import { obtenerDesafio, enviarIntentoDesafio } from "../services/desafioService";
+import React, { useState, useEffect } from "react";
+import { unirsePartidaApi, obtenerEstadoPartidaApi, registrarRespuestaApi } from "../services/desafioService";
 
-export default function JugarDesafio({ desafioId }) {
-  const [desafio, setDesafio] = useState(null);
-  const [nombreJugador, setNombreJugador] = useState("");
-  const [iniciado, setIniciado] = useState(false);
-  const [indiceActual, setIndiceActual] = useState(0);
-  const [puntaje, setPuntaje] = useState(0);
+export default function JugarDesafio() {
+  const [codigoSala, setCodigoSala] = useState("");
+  const [nombre, setNombre] = useState("");
+  const [enPartida, setEnPartida] = useState(false);
+  const [estadoPartida, setEstadoPartida] = useState(null);
+  const [jugadorId, setJugadorId] = useState(null);
+  const [preguntaActualIndex, setPreguntaActualIndex] = useState(0);
   const [tiempoInicio, setTiempoInicio] = useState(null);
-  const [tiempoTotal, setTiempoTotal] = useState(0);
-  const [resultadoFinal, setResultadoFinal] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
+  // Leer si viene un código de sala por la URL (?sala=ABC123)
   useEffect(() => {
-    obtenerDesafio(desafioId)
-      .then((data) => {
-        setDesafio(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        alert("El desafío no existe o expiró.");
-        setLoading(false);
-      });
-  }, [desafioId]);
+    const params = new URLSearchParams(window.location.search);
+    const salaUrl = params.get("sala");
+    if (salaUrl) {
+      setCodigoSala(salaUrl.toUpperCase());
+    }
+  }, []);
 
-  const comenzarJuego = (e) => {
+  // Polling para actualizar el estado de la sala en tiempo real cada 3 segundos
+  useEffect(() => {
+    let intervalo;
+    if (enPartida && codigoSala) {
+      intervalo = setInterval(async () => {
+        try {
+          const data = await obtenerEstadoPartidaApi(codigoSala);
+          setEstadoPartida(data);
+        } catch (err) {
+          console.error("Error sincronizando estado", err);
+        }
+      }, 3000);
+    }
+    return () => clearInterval(intervalo);
+  }, [enPartida, codigoSala]);
+
+  const handleUnirse = async (e) => {
     e.preventDefault();
-    if (!nombreJugador.trim()) return alert("Ingresa tu nombre para jugar");
-    setIniciado(true);
-    setTiempoInicio(Date.now());
-  };
-
-  const handleResponder = (opcionElegida) => {
-    const preguntaActual = desafio.preguntas[indiceActual];
-    const esCorrecta = opcionElegida === preguntaActual.respuesta_correcta;
-
-    let nuevoPuntaje = puntaje;
-    if (esCorrecta) {
-      nuevoPuntaje += 1;
-      setPuntaje(nuevoPuntaje);
+    if (!codigoSala || !nombre.trim()) {
+      setError("Ingresa el código de sala y tu nombre.");
+      return;
     }
-
-    const siguienteIndice = indiceActual + 1;
-    if (siguienteIndice < desafio.preguntas.length) {
-      setIndiceActual(siguienteIndice);
-    } else {
-      // Fin del juego (las 14 preguntas terminadas)
-      const tiempoFin = (Date.now() - tiempoInicio) / 1000; // en segundos
-      setTiempoTotal(tiempoFin);
-      
-      // Enviar resultado al backend
-      enviarIntentoDesafio(desafioId, nombreJugador, nuevoPuntaje, tiempoFin)
-        .then((res) => {
-          setResultadoFinal(res);
-        })
-        .catch((err) => alert("Error al guardar el resultado"));
+    try {
+      setError("");
+      const res = await unirsePartidaApi(codigoSala, nombre);
+      setJugadorId(res.jugador_id);
+      setEnPartida(true);
+      const estadoInicial = await obtenerEstadoPartidaApi(codigoSala);
+      setEstadoPartida(estadoInicial);
+      setTiempoInicio(Date.now());
+    } catch (err) {
+      setError("No se pudo unir a la sala. Verifica el código o si ya comenzó.");
     }
   };
 
-  if (loading) return <div className="text-center p-10">Cargando desafío...</div>;
-  if (!desafio) return <div className="text-center p-10 text-red-500">Desafío no encontrado.</div>;
+  const responderPregunta = async (esCorrecta) => {
+    const tiempoEmpleado = (Date.now() - tiempoInicio) / 1000; // Segundos empleados
+    try {
+      await registrarRespuestaApi(codigoSala, jugadorId, esCorrecta, tiempoEmpleado);
+      setPreguntaActualIndex((prev) => prev + 1);
+      setTiempoInicio(Date.now());
+      // Actualizar estado inmediato
+      const data = await obtenerEstadoPartidaApi(codigoSala);
+      setEstadoPartida(data);
+    } catch (err) {
+      alert("Error al enviar la respuesta.");
+    }
+  };
 
-  // Pantalla de resultados finales
-  if (resultadoFinal) {
+  if (!enPartida) {
     return (
-      <div className="p-6 max-w-lg mx-auto bg-white rounded-xl shadow-md text-center space-y-4">
-        <h2 className="text-3xl font-bold text-indigo-600">¡Desafío Finalizado!</h2>
-        <p className="text-lg">Ganador: <span className="font-bold text-green-600">{resultadoFinal.ganador ? `🏆 ${resultadoFinal.ganador}` : "Empate"}</span></p>
-        
-        <div className="bg-gray-50 p-4 rounded-md space-y-2 text-left">
-          <p><b>{resultadoFinal.jugador1.nombre}:</b> {resultadoFinal.jugador1.puntaje}/14 aciertos ({resultadoFinal.jugador1.tiempo?.toFixed(1)}s)</p>
-          {resultadoFinal.jugador2 && (
-            <p><b>{resultadoFinal.jugador2.nombre}:</b> {resultadoFinal.jugador2.puntaje}/14 aciertos ({resultadoFinal.jugador2.tiempo?.toFixed(1)}s)</p>
-          )}
-        </div>
-        <a href="/" className="inline-block bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">Volver al Inicio</a>
-      </div>
-    );
-  }
-
-  // Pantalla previa para ingresar nombre antes de empezar
-  if (!iniciado) {
-    return (
-      <div className="p-6 max-w-md mx-auto bg-white rounded-xl shadow-md space-y-4">
-        <h2 className="text-2xl font-bold text-center">Te han retado a un Desafío</h2>
-        <p className="text-center text-gray-600">Categoría: <b>{desafio.categoria}</b></p>
-        <p className="text-center text-sm text-gray-500">Retador: <b>{desafio.jugador1_nombre}</b></p>
-        
-        {desafio.jugador1_puntaje !== 0 && (
-          <div className="bg-yellow-50 p-3 rounded text-sm text-yellow-800 text-center">
-            Puntaje a vencer: <b>{desafio.jugador1_puntaje}/14 aciertos</b>
+      <div style={{ padding: "20px", maxWidth: "400px", margin: "auto", background: "#fff", borderRadius: "10px", boxShadow: "0 4px 10px rgba(0,0,0,0.1)" }}>
+        <h2>Unirse a Duelo Multijugador</h2>
+        {error && <p style={{ color: "red" }}>{error}</p>}
+        <form onSubmit={handleUnirse} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
+          <div>
+            <label>Código de Sala:</label>
+            <input 
+              type="text" 
+              value={codigoSala} 
+              onChange={(e) => setCodigoSala(e.target.value.toUpperCase())} 
+              placeholder="Ej: ABC123"
+              style={{ width: "100%", padding: "8px", textTransform: "uppercase" }}
+            />
           </div>
-        )}
-
-        <form onSubmit={comenzarJuego} className="space-y-4">
-          <input
-            type="text"
-            placeholder="Tu Nombre"
-            value={nombreJugador}
-            onChange={(e) => setNombreJugador(e.target.value)}
-            className="w-full p-2 border border-gray-300 rounded"
-            required
-          />
-          <button type="submit" className="w-full bg-green-600 text-white p-2 rounded hover:bg-green-700">
-            ¡Comenzar Desafío (14 Preguntas)!
+          <div>
+            <label>Tu Nombre:</label>
+            <input 
+              type="text" 
+              value={nombre} 
+              onChange={(e) => setNombre(e.target.value)} 
+              placeholder="Ej: Sonia"
+              style={{ width: "100%", padding: "8px" }}
+            />
+          </div>
+          <button type="submit" style={{ padding: "10px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}>
+            Unirme a la Partida
           </button>
         </form>
       </div>
     );
   }
 
-  // Pantalla de preguntas en curso
-  const preguntaActual = desafio.preguntas[indiceActual];
+  if (!estadoPartida) return <div style={{ textAlign: "center", padding: "50px" }}>Cargando partida...</div>;
+
+  // Pantalla de espera si el Jugador 2 aún no entra
+  if (estadoPartida.estado === "esperando") {
+    return (
+      <div style={{ textAlign: "center", padding: "40px" }}>
+        <h2>Sala: {codigoSala}</h2>
+        <p>Esperando a que se uná el oponente desde su celular...</p>
+      </div>
+    );
+  }
+
+  // Pantalla de Resultados y Reporte Final
+  if (estadoPartida.estado === "finalizado") {
+    return (
+      <div style={{ padding: "20px", maxWidth: "600px", margin: "auto", background: "#fff", borderRadius: "10px", textAlign: "center" }}>
+        <h2>Reporte Final de la Partida</h2>
+        <h3 style={{ color: "#16a34a" }}>Ganador: {estadoPartida.reporte.ganador}</h3>
+        <div style={{ display: "flex", justifyContent: "space-around", margin: "20px 0" }}>
+          <div style={{ background: "#f3f4f6", padding: "15px", borderRadius: "8px", width: "40%" }}>
+            <h4>{estadoPartida.jugador_1}</h4>
+            <p>Puntaje: {estadoPartida.reporte.detalles[estadoPartida.jugador_1].puntaje}</p>
+            <p>Tiempo Total: {estadoPartida.reporte.detalles[estadoPartida.jugador_1].tiempo_total_segundos}s</p>
+          </div>
+          <div style={{ background: "#f3f4f6", padding: "15px", borderRadius: "8px", width: "40%" }}>
+            <h4>{estadoPartida.jugador_2}</h4>
+            <p>Puntaje: {estadoPartida.reporte.detalles[estadoPartida.jugador_2].puntaje}</p>
+            <p>Tiempo Total: {estadoPartida.reporte.detalles[estadoPartida.jugador_2].tiempo_total_segundos}s</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const preguntas = estadoPartida.preguntas || [];
+  const preguntaActual = preguntas[preguntaActualIndex];
+
+  // Si ya respondió todas sus preguntas locales pero espera al otro
+  if (!preguntaActual || preguntaActualIndex >= preguntas.length) {
+    return (
+      <div style={{ textAlign: "center", padding: "40px" }}>
+        <h2>¡Has terminado tus preguntas!</h2>
+        <p>Esperando que tu oponente termine para ver el reporte final y el ganador...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 max-w-lg mx-auto bg-white rounded-xl shadow-md space-y-4">
-      <div className="flex justify-between text-sm text-gray-500 font-semibold">
-        <span>Pregunta {indiceActual + 1} / 14</span>
-        <span>Aciertos: {puntaje}</span>
-      </div>
+    <div style={{ padding: "20px", maxWidth: "600px", margin: "auto", background: "#fff", borderRadius: "10px", boxShadow: "0 4px 10px rgba(0,0,0,0.1)" }}>
+      <h3>Modo: {estadoPartida.tipo_modo.toUpperCase()} | Sala: {codigoSala}</h3>
+      <p>Jugador 1: {estadoPartida.jugador_1} ({estadoPartida.puntaje_1} pts) vs Jugador 2: {estadoPartida.jugador_2} ({estadoPartida.puntaje_2} pts)</p>
+      
+      {estadoPartida.tipo_modo === "1v1" && (
+        <p style={{ fontWeight: "bold", color: estadoPartida.turno_actual === jugadorId ? "green" : "red" }}>
+          {estadoPartida.turno_actual === jugadorId ? "¡Es tu turno de responder!" : "Esperando el turno del oponente..."}
+        </p>
+      )}
 
-      <h3 className="text-xl font-bold text-gray-800">{preguntaActual.pregunta}</h3>
-
-      <div className="space-y-2">
-        {preguntaActual.opciones.map((opcion, idx) => (
-          <button
-            key={idx}
-            onClick={() => handleResponder(opcion)}
-            className="w-full text-left p-3 bg-gray-100 hover:bg-indigo-50 border border-gray-200 rounded-lg transition font-medium"
-          >
-            {opcion}
-          </button>
-        ))}
+      <div style={{ marginTop: "20px", padding: "15px", background: "#f9fafb", borderRadius: "8px" }}>
+        <h4>Pregunta {preguntaActualIndex + 1} de {preguntas.length}</h4>
+        <p style={{ fontSize: "18px", fontWeight: "600" }}>{preguntaActual.pregunta}</p>
+        
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "15px" }}>
+          {preguntaActual.opciones.map((opcion, idx) => {
+            const esCorrecta = opcion === preguntaActual.respuesta_correcta;
+            const habilitado = estadoPartida.tipo_modo === "desafio" || estadoPartida.turno_actual === jugadorId;
+            return (
+              <button 
+                key={idx}
+                disabled={!habilitado}
+                onClick={() => responderPregunta(esCorrecta)}
+                style={{ padding: "10px", background: "#e0e7ff", border: "none", borderRadius: "5px", cursor: habilitado ? "pointer" : "not-allowed", textAlign: "left" }}
+              >
+                {opcion}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
