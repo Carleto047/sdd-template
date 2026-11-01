@@ -19,8 +19,8 @@ function MenuPrincipal() {
   const crearDueloEnVivo = (e) => {
     e.preventDefault();
     if (!nombreDuelo.trim()) return alert("Ingresa tu nombre");
-    // Generamos un código de sala único para el duelo
-    const codigoSala = Math.random().toString(36.substring(2, 8)).toUpperCase();
+    // Código de sala corregido sin error de sintaxis numérica
+    const codigoSala = Math.random().toString(36).substring(2, 8).toUpperCase();
     const urlDuelo = `${window.location.origin}/duelo/${codigoSala}?jugador=${encodeURIComponent(nombreDuelo)}`;
     setSalaDuelo(urlDuelo);
   };
