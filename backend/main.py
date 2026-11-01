@@ -5,6 +5,7 @@ import random
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text  # 👈 Importamos text para la ejecución de SQL directo
 from pydantic import BaseModel
 from database import SessionLocal, engine, Base
 from models import QuestionModel
@@ -12,6 +13,11 @@ from desafio import router as desafio_router
 from ia_generator import generar_10_preguntas_nuevas  # 👈 Importamos el generador de IA
 
 Base.metadata.create_all(bind=engine)
+
+# 👇 Sentencia de seguridad para crear la columna 'usada' en PostgreSQL si aún no existe
+with engine.connect() as connection:
+    connection.execute(text('ALTER TABLE preguntas ADD COLUMN IF NOT EXISTS usada BOOLEAN DEFAULT FALSE;'))
+    connection.commit()
 
 app = FastAPI()
 
