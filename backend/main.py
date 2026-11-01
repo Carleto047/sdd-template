@@ -5,16 +5,18 @@ import random
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text  # 👈 Importamos text para la ejecución de SQL directo
+from sqlalchemy import text
 from pydantic import BaseModel
 from database import SessionLocal, engine, Base
 from models import QuestionModel
-from desafio import router as desafio_router
-from ia_generator import generar_10_preguntas_nuevas  # 👈 Importamos el generador de IA
+from ia_generator import generar_10_preguntas_nuevas
+from desafio import router as desafio_router, Base as DesafioBase
 
+# 1. Crear las tablas principales y las del sistema de desafíos en PostgreSQL
 Base.metadata.create_all(bind=engine)
+DesafioBase.metadata.create_all(bind=engine)
 
-# 👇 Sentencia de seguridad para crear la columna 'usada' en PostgreSQL si aún no existe
+# 2. Sentencia de seguridad para asegurar que la columna 'usada' exista en la tabla preguntas
 with engine.connect() as connection:
     connection.execute(text('ALTER TABLE preguntas ADD COLUMN IF NOT EXISTS usada BOOLEAN DEFAULT FALSE;'))
     connection.commit()
@@ -28,6 +30,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Incluimos el router de desafíos
 app.include_router(desafio_router)
 
 # Tiempo en segundos según la dificultad de la pregunta
