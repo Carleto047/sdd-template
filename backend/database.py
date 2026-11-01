@@ -1,26 +1,18 @@
 import os
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-# Obtiene la URL de Render; si no existe, usa la conexión local de tu PC
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg://postgres:coca@localhost:5432/preguntados_db"
-)
+# URL por defecto para desarrollo local (SQLite) o la variable de entorno de Render (PostgreSQL)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")
 
-# Corrección automática para Render (a veces Render usa 'postgres://' en lugar de 'postgresql://')
+# Corrección de compatibilidad para asegurar que SQLAlchemy utilice psycopg2 correctamente
 if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://")
+elif DATABASE_URL.startswith("postgresql://") and "+" not in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://")
 
-# Configuración del motor y la sesión
+# Configuración del motor de la base de datos
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
-# Dependencia para obtener la sesión de base de datos en FastAPI
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
