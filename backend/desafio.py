@@ -1,38 +1,53 @@
-import uuid
 import random
+import string
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import Column, String, Integer, JSON, Float
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import Column, Integer, String, Boolean, JSON
 from database import Base, SessionLocal
 from models import QuestionModel
-from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/v1/desafio", tags=["Desafio"])
+router = APIRouter(prefix="/api/v1/desafios", tags=["Desafios"])
 
-# 1. Modelo SQLAlchemy para la tabla de desafíos
-class DesafioModel(Base):
-    __tablename__ = "desafios"
+# ==========================================
+# MODELO DE BASE DE DATOS PARA DUELOS 1V1
+# ==========================================
+class DueloModel(Base):
+    __tablename__ = "duelos_1v1"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo_sala = Column(String, unique=True, index=True)
+    categoria = Column(String)
+    preguntas_ids = Column(JSON) # IDs de las preguntas compartidas para el duelo
     
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4())[:8])
-    categoria = Column(String, nullable=False)
-    preguntas_ids = Column(JSON, nullable=False)  # Lista con los IDs exactos de las 14 preguntas
-    jugador1_nombre = Column(String, nullable=False)
-    jugador1_puntaje = Column(Integer, default=0)
-    jugador1_tiempo = Column(Float, default=0.0)  # Tiempo total en segundos
-    jugador2_nombre = Column(String, nullable=True)
-    jugador2_puntaje = Column(Integer, default=None)
-    jugador2_tiempo = Column(Float, default=None)
-    estado = Column(String, default="pendiente") # 'pendiente' o 'finalizado'
+    # Jugador 1 (Creador)
+    jugador_1 = Column(String)
+    puntaje_1 = Column(Integer, default=0)
+    progreso_1 = Column(Integer, default=0) # Índice de la pregunta actual (0 a 4)
+    terminado_1 = Column(Boolean, default=False)
+    
+    # Jugador 2 (Oponente)
+    jugador_2 = Column(String, nullable=True)
+    puntaje_2 = Column(Integer, default=0)
+    progreso_2 = Column(Integer, default=0)
+    terminado_2 = Column(Boolean, default=False)
+    
+    estado = Column(String, default="esperando") # 'esperando', 'jugando', 'finalizado'
 
-# Esquemas Pydantic corregidos (usando tipos nativos de Python: int)
-class CrearDesafioInput(BaseModel):
+# ==========================================
+# ESQUEMAS PYDANTIC
+# ==========================================
+class CrearDueloInput(BaseModel):
     nombre_jugador: str
     categoria: str
 
-class RegistrarIntentoInput(BaseModel):
+class UnirseDueloInput(BaseModel):
+    codigo_sala: str
     nombre_jugador: str
-    puntaje_total: int
-    tiempo_total: float
+
+class ResponderDueloInput(BaseModel):
+    jugador_id: int # 1 o 2
+    es_correcta: bool
 
 def get_db():
     db = SessionLocal()
@@ -41,111 +56,138 @@ def get_db():
     finally:
         db.close()
 
-# 2. Endpoint para que el Jugador 1 cree el desafío (Selecciona 14 preguntas al azar)
+def generar_codigo():
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+# ==========================================
+# ENDPOINTS DE LA API PARA 1V1
+# ==========================================
+
 @router.post("/crear")
-def crear_desafio(data: CrearDesafioInput, db: Session = Depends(get_db)):
-    preguntas_cat = db.query(QuestionModel).filter(QuestionModel.categoria == data.categoria).all()
+def crear_duelo(data: CrearDueloInput, db: Session = Depends(get_db)):
+    """El Jugador 1 crea la sala ingresando su nombre y la categoría."""
+    preguntas = db.query(QuestionModel).filter(QuestionModel.categoria == data.categoria).all()
+    if len(preguntas) < 5:
+        raise HTTPException(status_code=400, detail="No hay suficientes preguntas en esta categoría para armar un duelo de 5 rondas.")
     
-    if len(preguntas_cat) < 14:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"No hay suficientes preguntas en la categoría '{data.categoria}' para armar un desafío de 14 preguntas (hay {len(preguntas_cat)})."
-        )
+    # Seleccionamos exactamente 5 preguntas aleatorias para ambos jugadores
+    preguntas_seleccionadas = random.sample(preguntas, 5)
+    ids = [p.id for p in preguntas_seleccionadas]
     
-    # Seleccionar exactamente 14 preguntas al azar
-    seleccionadas = random.sample(preguntas_cat, 14)
-    ids_preguntas = [p.id for p in seleccionadas]
+    codigo = generar_codigo()
     
-    nuevo_desafio = DesafioModel(
+    nuevo_duelo = DueloModel(
+        codigo_sala=codigo,
         categoria=data.categoria,
-        preguntas_ids=ids_preguntas,
-        jugador1_nombre=data.nombre_jugador,
-        estado="pendiente"
+        preguntas_ids=ids,
+        jugador_1=data.nombre_jugador.strip(),
+        puntaje_1=0,
+        progreso_1=0,
+        estado="esperando"
     )
     
-    db.add(nuevo_desafio)
+    db.add(nuevo_duelo)
     db.commit()
-    db.refresh(nuevo_desafio)
+    db.refresh(nuevo_duelo)
     
+    # Retornamos el código y un enlace directo listo para compartir
     return {
-        "desafio_id": nuevo_desafio.id,
-        "mensaje": "Desafío creado con éxito",
-        "enlace": f"/desafio/{nuevo_desafio.id}"
+        "codigo_sala": nuevo_duelo.codigo_sala,
+        "jugador_id": 1,
+        "enlace_invitacion": f"https://sdd-template.onrender.com/jugar-duelo?sala={nuevo_duelo.codigo_sala}",
+        "mensaje": "Sala creada con éxito."
     }
 
-# 3. Endpoint para obtener los datos del desafío y las 14 preguntas exactas (con su respuesta para validar)
-@router.get("/{desafio_id}")
-def obtener_desafio(desafio_id: str, db: Session = Depends(get_db)):
-    desafio = db.query(DesafioModel).filter(DesafioModel.id == desafio_id).first()
-    if not desafio:
-        raise HTTPException(status_code=404, detail="Desafío no encontrado")
+@router.post("/unirse")
+def unirse_duelo(data: UnirseDueloInput, db: Session = Depends(get_db)):
+    """El Jugador 2 se une desde otro dispositivo usando el código de sala y su nombre."""
+    duelo = db.query(DueloModel).filter(DueloModel.codigo_sala == data.codigo_sala.strip().upper()).first()
+    if not duelo:
+        raise HTTPException(status_code=404, detail="Sala no encontrada. Verifica el código.")
     
-    # Buscar las 14 preguntas usando los IDs guardados en el orden exacto
-    preguntas = []
-    for q_id in desafio.preguntas_ids:
+    if duelo.estado != "esperando":
+        raise HTTPException(status_code=400, detail="El duelo ya comenzó o la sala está cerrada.")
+    
+    if duelo.jugador_1.lower() == data.nombre_jugador.strip().lower():
+        raise HTTPException(status_code=400, detail="El nombre de usuario ya está en uso por el creador.")
+
+    duelo.jugador_2 = data.nombre_jugador.strip()
+    duelo.estado = "jugando"
+    db.commit()
+    db.refresh(duelo)
+    
+    return {
+        "codigo_sala": duelo.codigo_sala,
+        "jugador_id": 2,
+        "categoria": duelo.categoria,
+        "mensaje": "Te has unido al duelo con éxito."
+    }
+
+@router.get("/estado/{codigo_sala}")
+def obtener_estado_duelo(codigo_sala: str, db: Session = Depends(get_db)):
+    """Permite a ambos celulares consultar en tiempo real los puntajes y las preguntas."""
+    duelo = db.query(DueloModel).filter(DueloModel.codigo_sala == codigo_sala.upper()).first()
+    if not duelo:
+        raise HTTPException(status_code=404, detail="Sala no encontrada.")
+    
+    # Cargamos las preguntas correspondientes a la sala
+    preguntas_objs = []
+    for q_id in duelo.preguntas_ids:
         p = db.query(QuestionModel).filter(QuestionModel.id == q_id).first()
         if p:
-            preguntas.append({
+            preguntas_objs.append({
                 "id": p.id,
                 "pregunta": p.pregunta,
                 "opciones": p.opciones,
-                "respuesta_correcta": p.respuesta_correcta,  # 👈 Añadido para que el frontend valide
+                "respuesta_correcta": p.respuesta_correcta,
                 "dificultad": p.dificultad
             })
-            
+
     return {
-        "id": desafio.id,
-        "categoria": desafio.categoria,
-        "jugador1_nombre": desafio.jugador1_nombre,
-        "jugador1_puntaje": desafio.jugador1_puntaje,
-        "jugador1_tiempo": desafio.jugador1_tiempo,
-        "jugador2_nombre": desafio.jugador2_nombre,
-        "jugador2_puntaje": desafio.jugador2_puntaje,
-        "estado": desafio.estado,
-        "preguntas": preguntas
+        "estado": duelo.estado,
+        "jugador_1": duelo.jugador_1,
+        "puntaje_1": duelo.puntaje_1,
+        "progreso_1": duelo.progreso_1,
+        "terminado_1": duelo.terminado_1,
+        "jugador_2": duelo.jugador_2 or "Esperando oponente...",
+        "puntaje_2": duelo.puntaje_2,
+        "progreso_2": duelo.progreso_2,
+        "terminado_2": duelo.terminado_2,
+        "preguntas": preguntas_objs
     }
 
-# 4. Endpoint para registrar el puntaje del Jugador 1 o Jugador 2 de forma segura
-@router.post("/{desafio_id}/jugar")
-def registrar_puntaje_desafio(desafio_id: str, data: RegistrarIntentoInput, db: Session = Depends(get_db)):
-    desafio = db.query(DesafioModel).filter(DesafioModel.id == desafio_id).first()
-    if not desafio:
-        raise HTTPException(status_code=404, detail="Desafío no encontrado")
+@router.post("/responder/{codigo_sala}")
+def registrar_respuesta_duelo(codigo_sala: str, data: ResponderDueloInput, db: Session = Depends(get_db)):
+    """Registra si el jugador 1 o 2 respondió bien o mal, sumando puntos y avanzando su progreso."""
+    duelo = db.query(DueloModel).filter(DueloModel.codigo_sala == codigo_sala.upper()).first()
+    if not duelo:
+        raise HTTPException(status_code=404, detail="Sala no encontrada.")
     
-    # Si el que envía es el Jugador 1 actualizando su resultado
-    if data.nombre_jugador == desafio.jugador1_nombre:
-        desafio.jugador1_puntaje = data.puntaje_total
-        desafio.jugador1_tiempo = data.tiempo_total
-    # Si el Jugador 2 ya está asignado y vuelve a enviar
-    elif desafio.jugador2_nombre and data.nombre_jugador == desafio.jugador2_nombre:
-        desafio.jugador2_puntaje = data.puntaje_total
-        desafio.jugador2_tiempo = data.tiempo_total
-    # Si es un nuevo jugador participando como Jugador 2
-    else:
-        desafio.jugador2_nombre = data.nombre_jugador
-        desafio.jugador2_puntaje = data.puntaje_total
-        desafio.jugador2_tiempo = data.tiempo_total
-        desafio.estado = "finalizado"  # Al registrar al J2, el desafío se completa
-        
-    db.commit()
-    db.refresh(desafio)
+    total_preguntas = len(duelo.preguntas_ids)
     
-    ganador = None
-    if desafio.estado == "finalizado":
-        if (desafio.jugador1_puntaje or 0) > (desafio.jugador2_puntaje or 0):
-            ganador = desafio.jugador1_nombre
-        elif (desafio.jugador2_puntaje or 0) > (desafio.jugador1_puntaje or 0):
-            ganador = desafio.jugador2_nombre
-        else:
-            # Desempate por menor tiempo total acumulado (gana el que hizo menos segundos)
-            if (desafio.jugador1_tiempo or 999) < (desafio.jugador2_tiempo or 999):
-                ganador = desafio.jugador1_nombre
-            else:
-                ganador = desafio.jugador2_nombre
+    if data.jugador_id == 1:
+        if data.es_correcta:
+            duelo.puntaje_1 += 10
+        duelo.progreso_1 += 1
+        if duelo.progreso_1 >= total_preguntas:
+            duelo.terminado_1 = True
+    elif data.jugador_id == 2:
+        if data.es_correcta:
+            duelo.puntaje_2 += 10
+        duelo.progreso_2 += 1
+        if duelo.progreso_2 >= total_preguntas:
+            duelo.terminado_2 = True
 
+    # Si ambos terminaron sus 5 preguntas, el duelo finaliza oficialmente
+    if duelo.terminado_1 and duelo.terminado_2:
+        duelo.estado = "finalizado"
+
+    db.commit()
+    db.refresh(duelo)
+    
     return {
-        "estado": desafio.estado,
-        "ganador": ganador,
-        "jugador1": {"nombre": desafio.jugador1_nombre, "puntaje": desafio.jugador1_puntaje, "tiempo": desafio.jugador1_tiempo},
-        "jugador2": {"nombre": desafio.jugador2_nombre, "puntaje": desafio.jugador2_puntaje, "tiempo": desafio.jugador2_tiempo}
+        "mensaje": "Respuesta procesada",
+        "progreso_1": duelo.progreso_1,
+        "progreso_2": duelo.progreso_2,
+        "estado": duelo.estado
     }
