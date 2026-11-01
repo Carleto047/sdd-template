@@ -223,22 +223,22 @@ def registrar_respuesta(id: int, respuesta: RespuestaInput, db: Session = Depend
 # CONFIGURACIÓN PARA SERVIR EL FRONTEND DE REACT EN RENDER
 # ==========================================================
 
-frontend_dist = os.path.join(os.path.dirname(__file__), "dist")
+frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dist"))
+if not os.path.exists(frontend_dist):
+    frontend_dist = os.path.join(os.path.dirname(__file__), "dist")
 
 if os.path.exists(frontend_dist):
-    # Monta la carpeta de assets compilados por Vite/React (JS, CSS, imágenes)
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+    assets_path = os.path.join(frontend_dist, "assets")
+    if os.path.exists(assets_path):
+        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
 
-    # Servidor SPA: Redirige cualquier ruta de la web hacia el index.html
     @app.get("/{full_path:path}")
     def serve_react(full_path: str):
-        # Si la petición busca una ruta de la API, dejamos que FastAPI devuelva error si no existe
-        if full_path.startswith("api/"):
+        if full_path.startswith("api/") or full_path.startswith("health"):
             raise HTTPException(status_code=404, detail="API route not found")
         
         file_path = os.path.join(frontend_dist, full_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)
         
-        # En cualquier otro caso devolvemos el index.html para que React Router maneje las rutas
         return FileResponse(os.path.join(frontend_dist, "index.html"))
