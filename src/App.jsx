@@ -1,135 +1,76 @@
-import { useState } from "react";
-import { BrowserRouter, Routes, Route, useParams } from "react-router-dom";
+import React, { useState } from "react";
 import CrearDesafio from "./components/CrearDesafio";
 import JugarDesafio from "./components/JugarDesafio";
 
-// Componente para manejar la ruta del desafío del Jugador 2
-function DesafioWrapper() {
-  let { id } = useParams();
-  return <JugarDesafio desafioId={id} />;
-}
-
-// Menú Principal con opciones claras para Desafío y Duelo
-function MenuPrincipal() {
-  const [categoria, setCategoria] = useState("Cultura General");
-  const [modoActivo, setModoActivo] = useState(null); // 'menu', 'desafio', 'duelo'
-  const [nombreDuelo, setNombreDuelo] = useState("");
-  const [salaDuelo, setSalaDuelo] = useState("");
-
-  const crearDueloEnVivo = (e) => {
-    e.preventDefault();
-    if (!nombreDuelo.trim()) return alert("Ingresa tu nombre");
-    // Código de sala corregido sin error de sintaxis numérica
-    const codigoSala = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const urlDuelo = `${window.location.origin}/duelo/${codigoSala}?jugador=${encodeURIComponent(nombreDuelo)}`;
-    setSalaDuelo(urlDuelo);
-  };
-
-  return (
-    <div className="p-6 max-w-md mx-auto bg-white rounded-xl shadow-md space-y-6 text-center">
-      <h1 className="text-3xl font-bold text-indigo-600">Trivia Mundial</h1>
-      
-      {modoActivo === null && (
-        <div className="space-y-4">
-          <p className="text-gray-600">Selecciona cómo deseas competir contra otra persona:</p>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Categoría:</label>
-            <select 
-              value={categoria} 
-              onChange={(e) => setCategoria(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded-md"
-            >
-              <option value="Cultura General">Cultura General</option>
-              <option value="Historia">Historia</option>
-              <option value="Ciencia">Ciencia</option>
-              <option value="Geografía">Geografía</option>
-            </select>
-          </div>
-
-          <button
-            onClick={() => setModoActivo("desafio")}
-            className="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold hover:bg-indigo-700 transition shadow"
-          >
-            ⚔️ Modo Desafío (14 Preguntas / Asíncrono)
-          </button>
-
-          <button
-            onClick={() => setModoActivo("duelo")}
-            className="w-full bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition shadow"
-          >
-            🎮 Modo Duelo 1vs1 (Sala Compartida)
-          </button>
-        </div>
-      )}
-
-      {modoActivo === "desafio" && (
-        <div className="space-y-4">
-          <CrearDesafio categoriaSeleccionada={categoria} />
-          <button
-            onClick={() => setModoActivo(null)}
-            className="text-sm text-gray-500 underline hover:text-gray-700 block mx-auto"
-          >
-            ← Volver al menú principal
-          </button>
-        </div>
-      )}
-
-      {modoActivo === "duelo" && (
-        <div className="space-y-4">
-          <h2 className="text-2xl font-bold text-green-600">Modo Duelo 1vs1</h2>
-          {!salaDuelo ? (
-            <form onSubmit={crearDueloEnVivo} className="space-y-3 text-left">
-              <label className="block text-sm font-medium text-gray-700">Tu Nombre:</label>
-              <input
-                type="text"
-                placeholder="Ej. Carlos"
-                value={nombreDuelo}
-                onChange={(e) => setNombreDuelo(e.target.value)}
-                className="w-full p-2 border border-gray-300 rounded"
-                required
-              />
-              <button type="submit" className="w-full bg-green-600 text-white p-2 rounded hover:bg-green-700">
-                Crear Enlace de Duelo
-              </button>
-            </form>
-          ) : (
-            <div className="space-y-3 bg-gray-50 p-4 rounded text-left">
-              <p className="text-sm text-green-700 font-semibold text-center">¡Sala de Duelo creada!</p>
-              <p className="text-xs text-gray-500">Comparte este enlace con tu oponente para que ingrese desde su celular:</p>
-              <input type="text" readOnly value={salaDuelo} className="w-full p-2 text-xs bg-white border rounded" />
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(salaDuelo);
-                  alert("¡Enlace de duelo copiado!");
-                }}
-                className="w-full bg-indigo-600 text-white p-2 rounded text-sm"
-              >
-                Copiar Enlace
-              </button>
-            </div>
-          )}
-          <button
-            onClick={() => { setModoActivo(null); setSalaDuelo(""); }}
-            className="text-sm text-gray-500 underline hover:text-gray-700 block mx-auto"
-          >
-            ← Volver al menú principal
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function App() {
+  // Estado para controlar qué pestaña está activa ("1", "1vs1", "desafio")
+  const [vistaActiva, setVistaActiva] = useState("1vs1");
+  const [salaCreada, setSalaCreada] = useState(null);
+
   return (
-    <BrowserRouter>
-      <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center">
-        <Routes>
-          <Route path="/" element={<MenuPrincipal />} />
-          <Route path="/desafio/:id" element={<DesafioWrapper />} />
-        </Routes>
+    <div style={{ minHeight: "100vh", background: "#3b82f6", padding: "20px", fontFamily: "sans-serif" }}>
+      {/* Barra de Navegación Superior */}
+      <div style={{ display: "flex", justifyContent: "center", gap: "10px", marginBottom: "30px" }}>
+        <button 
+          onClick={() => setVistaActiva("1")}
+          style={{ padding: "10px 20px", background: vistaActiva === "1" ? "#1e40af" : "#fff", color: vistaActiva === "1" ? "#fff" : "#000", border: "none", borderRadius: "20px", cursor: "pointer", fontWeight: "bold" }}
+        >
+          👤 1 Jugador
+        </button>
+        <button 
+          onClick={() => setVistaActiva("1vs1")}
+          style={{ padding: "10px 20px", background: vistaActiva === "1vs1" ? "#1e40af" : "#fff", color: vistaActiva === "1vs1" ? "#fff" : "#000", border: "none", borderRadius: "20px", cursor: "pointer", fontWeight: "bold" }}
+        >
+          ⚔️ 1 vs 1 (Por turnos)
+        </button>
+        <button 
+          onClick={() => setVistaActiva("desafio")}
+          style={{ padding: "10px 20px", background: vistaActiva === "desafio" ? "#1e40af" : "#fff", color: vistaActiva === "desafio" ? "#fff" : "#000", border: "none", borderRadius: "20px", cursor: "pointer", fontWeight: "bold" }}
+        >
+          🎯 Modo Desafío (Simultáneo)
+        </button>
       </div>
-    </BrowserRouter>
+
+      {/* Contenido según la pestaña seleccionada */}
+      <div style={{ maxWidth: "800px", margin: "auto" }}>
+        {vistaActiva === "1" && (
+          <div style={{ background: "#fff", padding: "20px", borderRadius: "10px", textAlign: "center" }}>
+            <h2>Modo 1 Jugador (Local)</h2>
+            <p>Aquí puedes mantener tu ruleta y juego clásico individual.</p>
+          </div>
+        )}
+
+        {vistaActiva === "1vs1" && (
+          <div>
+            <div style={{ background: "#eff6ff", padding: "15px", borderRadius: "10px", marginBottom: "20px", textAlign: "center" }}>
+              <h3>Modo 1 vs 1 entre Celulares (Por Turnos)</h3>
+              <p>Crea una sala con tu nombre o unete a una existente mediante código o enlace.</p>
+            </div>
+            
+            {/* Componente para crear sala o unirse */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <CrearDesafio onPartidaCreada={(sala) => setSalaCreada(sala)} />
+              <hr style={{ border: "0", borderTop: "1px solid #ccc" }} />
+              <JugarDesafio />
+            </div>
+          </div>
+        )}
+
+        {vistaActiva === "desafio" && (
+          <div>
+            <div style={{ background: "#eff6ff", padding: "15px", borderRadius: "10px", marginBottom: "20px", textAlign: "center" }}>
+              <h3>Modo Desafío (Mismas Preguntas, Tiempo y Reporte)</h3>
+              <p>Compite simultáneamente respondiendo las mismas preguntas. ¡Gana el de mayor acierto y menor tiempo!</p>
+            </div>
+            
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <CrearDesafio onPartidaCreada={(sala) => setSalaCreada(sala)} />
+              <hr style={{ border: "0", borderTop: "1px solid #ccc" }} />
+              <JugarDesafio />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
