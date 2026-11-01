@@ -4,9 +4,12 @@ import random
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
+
 from database import SessionLocal, engine, Base
 from models import QuestionModel
 from ia_generator import generar_10_preguntas_nuevas
@@ -64,7 +67,7 @@ def sembrar_preguntas():
                 dificultad=p.get("dificultad") or "normal",
                 veces_correcta=0,
                 veces_incorrecta=0,
-                usada=False,  # 👈 Inicializamos en False
+                usada=False,
             ))
             nuevas += 1
         db.commit()
@@ -87,6 +90,7 @@ def get_db():
     finally:
         db.close()
 
+
 def a_respuesta(pregunta: QuestionModel):
     """Arma la respuesta JSON de una pregunta, agregando el tiempo límite según su dificultad."""
     return {
@@ -99,12 +103,15 @@ def a_respuesta(pregunta: QuestionModel):
         "tiempo_limite": TIEMPOS_POR_DIFICULTAD.get(pregunta.dificultad, 30),
     }
 
+
 class RespuestaInput(BaseModel):
     correcta: bool
+
 
 @app.get("/health")
 def health():
     return {"ok": True}
+
 
 @app.get("/api/v1/question/{id}")
 def get_question(id: int, db: Session = Depends(get_db)):
@@ -112,6 +119,7 @@ def get_question(id: int, db: Session = Depends(get_db)):
     if not pregunta:
         raise HTTPException(status_code=404, detail="Pregunta no encontrada")
     return a_respuesta(pregunta)
+
 
 @app.get("/api/v1/question/random/{categoria}")
 def get_random_question(categoria: str, db: Session = Depends(get_db)):
@@ -173,6 +181,7 @@ def get_random_question(categoria: str, db: Session = Depends(get_db)):
 
     return a_respuesta(pregunta_elegida)
 
+
 @app.post("/api/v1/question/{id}/responder")
 def registrar_respuesta(id: int, respuesta: RespuestaInput, db: Session = Depends(get_db)):
     """
@@ -208,3 +217,28 @@ def registrar_respuesta(id: int, respuesta: RespuestaInput, db: Session = Depend
         "dificultad": pregunta.dificultad,
         "tiempo_limite": TIEMPOS_POR_DIFICULTAD[pregunta.dificultad],
     }
+
+
+# ==========================================================
+# CONFIGURACIÓN PARA SERVIR EL FRONTEND DE REACT EN PRODUCTION
+# ==========================================================
+
+frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dist"))
+
+if os.path.exists(frontend_dist):
+    # Monta la carpeta de assets compilados por Vite/React (JS, CSS, imágenes)
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+
+    # Servidor SPA: Redirige cualquier ruta de la web hacia el index.html
+    @app.get("/{full_path:path}")
+    def serve_react(full_path: str):
+        # Si la petición busca una ruta de la API, dejamos que FastAPI devuelva error si no existe
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API route not found")
+        
+        file_path = os.path.join(frontend_dist, full_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        
+        # En cualquier otro caso devuelves el index.html para que React Router maneje las rutas
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
