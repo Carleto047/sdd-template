@@ -1,75 +1,39 @@
-"""
-Desafío 1 vs 1 (14 preguntas, mismas para los dos jugadores).
-
-- POST /api/v1/desafio                    -> crea un desafío y devuelve su código
-- GET  /api/v1/desafio/{codigo}           -> las 14 preguntas (SIN la respuesta correcta)
-- POST /api/v1/desafio/{codigo}/resultado -> el jugador envía sus respuestas
-- GET  /api/v1/desafio/{codigo}/reporte   -> su reporte + el del rival (solo si ya terminó)
-"""
+import uuid
 import random
-import secrets
-from datetime import datetime, timezone
-from typing import List, Optional
-
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import Column, DateTime, Integer, JSON, String
+from sqlalchemy import Column, String, Integer, JSON, Float
 from sqlalchemy.orm import Session
-
-from database import Base, SessionLocal, engine
+from database import Base, SessionLocal
 from models import QuestionModel
+from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/v1/desafio", tags=["desafio"])
+router = APIRouter(prefix="/api/v1/desafio", tags=["Desafio"])
 
-CATEGORIAS = ["Geografía", "Ciencia", "Historia", "Arte", "Deportes", "Entretenimiento", "IESETyFP"]
-PREGUNTAS_POR_CATEGORIA = 2  # 7 categorías x 2 = 14 preguntas
-TIEMPOS_POR_DIFICULTAD = {"facil": 15, "normal": 30, "dificil": 40}
-ALFABETO_CODIGO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sin 0/O/1/I para evitar confusiones
-
-
-# ---------------------------------------------------------------- tablas nuevas
+# 1. Modelo SQLAlchemy para la tabla de desafíos
 class DesafioModel(Base):
     __tablename__ = "desafios"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4())[:8])
+    categoria = Column(String, nullable=False)
+    preguntas_ids = Column(JSON, nullable=False)  # Lista con los IDs exactos de las 14 preguntas
+    jugador1_nombre = Column(String, nullable=False)
+    jugador1_puntaje = Column(Integer, default=0)
+    jugador1_tiempo = Column(Float, default=0.0)  # Tiempo total en segundos
+    jugador2_nombre = Column(String, nullable=True)
+    jugador2_puntaje = Column(Integer, default=None)
+    jugador2_tiempo = Column(Float, default=None)
+    estado = Column(String, default="pendiente") # 'pendiente' o 'finalizado'
 
-    codigo = Column(String, primary_key=True)
-    preguntas = Column(JSON, nullable=False)  # [{"id": 12, "tiempo_limite": 30}, ...]
-    creado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+# Esquemas Pydantic corregidos (usando tipos nativos de Python: int)
+class CrearDesafioInput(BaseModel):
+    nombre_jugador: str
+    categoria: str
 
+class RegistrarIntentoInput(BaseModel):
+    nombre_jugador: str
+    puntaje_total: int
+    tiempo_total: float
 
-class ResultadoDesafioModel(Base):
-    __tablename__ = "resultados_desafio"
-
-    id = Column(Integer, primary_key=True, index=True)
-    codigo = Column(String, index=True, nullable=False)
-    jugador_id = Column(String, nullable=False)
-    nombre = Column(String, nullable=False)
-    aciertos = Column(Integer, nullable=False)
-    tiempo_total_ms = Column(Integer, nullable=False)
-    detalle = Column(JSON, nullable=False)
-    terminado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-
-# Crea solo las 2 tablas nuevas (no toca la tabla "preguntas")
-Base.metadata.create_all(
-    bind=engine,
-    tables=[DesafioModel.__table__, ResultadoDesafioModel.__table__],
-)
-
-
-# ---------------------------------------------------------------- datos de entrada
-class RespuestaItem(BaseModel):
-    pregunta_id: int
-    opcion: Optional[str] = None  # None = no respondió (se acabó el tiempo)
-    tiempo_ms: int = 0
-
-
-class ResultadoInput(BaseModel):
-    jugador_id: str
-    nombre: str
-    respuestas: List[RespuestaItem]
-
-
-# ---------------------------------------------------------------- utilidades
 def get_db():
     db = SessionLocal()
     try:
@@ -77,191 +41,111 @@ def get_db():
     finally:
         db.close()
 
+# 2. Endpoint para que el Jugador 1 cree el desafío (Selecciona 14 preguntas al azar)
+@router.post("/crear")
+def crear_desafio(data: CrearDesafioInput, db: Session = Depends(get_db)):
+    preguntas_cat = db.query(QuestionModel).filter(QuestionModel.categoria == data.categoria).all()
+    
+    if len(preguntas_cat) < 14:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"No hay suficientes preguntas en la categoría '{data.categoria}' para armar un desafío de 14 preguntas (hay {len(preguntas_cat)})."
+        )
+    
+    # Seleccionar exactamente 14 preguntas al azar
+    seleccionadas = random.sample(preguntas_cat, 14)
+    ids_preguntas = [p.id for p in seleccionadas]
+    
+    nuevo_desafio = DesafioModel(
+        categoria=data.categoria,
+        preguntas_ids=ids_preguntas,
+        jugador1_nombre=data.nombre_jugador,
+        estado="pendiente"
+    )
+    
+    db.add(nuevo_desafio)
+    db.commit()
+    db.refresh(nuevo_desafio)
+    
+    return {
+        "desafio_id": nuevo_desafio.id,
+        "mensaje": "Desafío creado con éxito",
+        "enlace": f"/desafio/{nuevo_desafio.id}"
+    }
 
-def limpiar_codigo(codigo: str) -> str:
-    return codigo.strip().upper()
-
-
-def generar_codigo(db: Session) -> str:
-    for _ in range(30):
-        codigo = "".join(secrets.choice(ALFABETO_CODIGO) for _ in range(6))
-        if not db.query(DesafioModel).filter(DesafioModel.codigo == codigo).first():
-            return codigo
-    raise HTTPException(status_code=500, detail="No se pudo generar un código nuevo")
-
-
-def buscar_desafio(db: Session, codigo: str) -> DesafioModel:
-    desafio = db.query(DesafioModel).filter(DesafioModel.codigo == limpiar_codigo(codigo)).first()
+# 3. Endpoint para obtener los datos del desafío y las 14 preguntas exactas (con su respuesta para validar)
+@router.get("/{desafio_id}")
+def obtener_desafio(desafio_id: str, db: Session = Depends(get_db)):
+    desafio = db.query(DesafioModel).filter(DesafioModel.id == desafio_id).first()
     if not desafio:
-        raise HTTPException(status_code=404, detail="Código de desafío inexistente")
-    return desafio
-
-
-def cargar_pares(db: Session, desafio: DesafioModel):
-    """Devuelve [(item_guardado, pregunta_de_la_base)] en el orden del desafío."""
-    ids = [item["id"] for item in desafio.preguntas]
-    filas = {q.id: q for q in db.query(QuestionModel).filter(QuestionModel.id.in_(ids)).all()}
-    return [(item, filas[item["id"]]) for item in desafio.preguntas if item["id"] in filas]
-
-
-def opciones_en_orden_fijo(codigo: str, pregunta) -> List[str]:
-    """Mezcla las opciones, pero igual para los dos jugadores (depende del código y de la pregunta)."""
-    opciones = list(pregunta.opciones)
-    random.Random(f"{codigo}-{pregunta.id}").shuffle(opciones)
-    return opciones
-
-
-def evaluar_respuestas(pares, respuestas_por_id):
-    """
-    Corrige en el servidor. Una pregunta sin responder (o con una opción inválida)
-    cuenta como incorrecta y suma el tiempo límite completo.
-    """
-    detalle = []
-    aciertos = 0
-    tiempo_total_ms = 0
-    for item, pregunta in pares:
-        enviada = respuestas_por_id[pregunta.id]
-        limite_ms = int(item["tiempo_limite"]) * 1000
-        opcion = enviada.opcion if (enviada.opcion is not None and enviada.opcion in pregunta.opciones) else None
-        tiempo_ms = limite_ms if opcion is None else max(0, min(int(enviada.tiempo_ms), limite_ms))
-        correcta = opcion == pregunta.respuesta_correcta
-        if correcta:
-            aciertos += 1
-        tiempo_total_ms += tiempo_ms
-        detalle.append({
-            "pregunta_id": pregunta.id,
-            "categoria": pregunta.categoria,
-            "pregunta": pregunta.pregunta,
-            "opcion_elegida": opcion,
-            "respuesta_correcta": pregunta.respuesta_correcta,
-            "correcta": correcta,
-            "tiempo_ms": tiempo_ms,
-        })
-    return aciertos, tiempo_total_ms, detalle
-
-
-def decidir_ganador(yo, rival):
-    """Más aciertos gana; si empatan, gana el que tardó menos. Devuelve (ganador, criterio)."""
-    if yo.aciertos != rival.aciertos:
-        return ("yo" if yo.aciertos > rival.aciertos else "rival"), "más aciertos"
-    if yo.tiempo_total_ms != rival.tiempo_total_ms:
-        return ("yo" if yo.tiempo_total_ms < rival.tiempo_total_ms else "rival"), "mismos aciertos: gana el más rápido"
-    return "empate", "mismos aciertos y mismo tiempo"
-
-
-def serializar_resultado(r):
+        raise HTTPException(status_code=404, detail="Desafío no encontrado")
+    
+    # Buscar las 14 preguntas usando los IDs guardados en el orden exacto
+    preguntas = []
+    for q_id in desafio.preguntas_ids:
+        p = db.query(QuestionModel).filter(QuestionModel.id == q_id).first()
+        if p:
+            preguntas.append({
+                "id": p.id,
+                "pregunta": p.pregunta,
+                "opciones": p.opciones,
+                "respuesta_correcta": p.respuesta_correcta,  # 👈 Añadido para que el frontend valide
+                "dificultad": p.dificultad
+            })
+            
     return {
-        "nombre": r.nombre,
-        "aciertos": r.aciertos,
-        "total": len(r.detalle),
-        "tiempo_total_ms": r.tiempo_total_ms,
-        "tiempo_total_seg": round(r.tiempo_total_ms / 1000, 1),
-        "detalle": r.detalle,
+        "id": desafio.id,
+        "categoria": desafio.categoria,
+        "jugador1_nombre": desafio.jugador1_nombre,
+        "jugador1_puntaje": desafio.jugador1_puntaje,
+        "jugador1_tiempo": desafio.jugador1_tiempo,
+        "jugador2_nombre": desafio.jugador2_nombre,
+        "jugador2_puntaje": desafio.jugador2_puntaje,
+        "estado": desafio.estado,
+        "preguntas": preguntas
     }
 
-
-# ---------------------------------------------------------------- endpoints
-@router.post("")
-def crear_desafio(db: Session = Depends(get_db)):
-    elegidas = []
-    for categoria in CATEGORIAS:
-        candidatas = db.query(QuestionModel).filter(QuestionModel.categoria == categoria).all()
-        if len(candidatas) < PREGUNTAS_POR_CATEGORIA:
-            raise HTTPException(
-                status_code=400,
-                detail=f"La categoría {categoria} necesita al menos {PREGUNTAS_POR_CATEGORIA} preguntas",
-            )
-        elegidas.extend(random.sample(candidatas, PREGUNTAS_POR_CATEGORIA))
-    random.shuffle(elegidas)
-
-    codigo = generar_codigo(db)
-    db.add(DesafioModel(
-        codigo=codigo,
-        preguntas=[
-            {"id": q.id, "tiempo_limite": TIEMPOS_POR_DIFICULTAD.get(q.dificultad, 30)}
-            for q in elegidas
-        ],
-    ))
+# 4. Endpoint para registrar el puntaje del Jugador 1 o Jugador 2 de forma segura
+@router.post("/{desafio_id}/jugar")
+def registrar_puntaje_desafio(desafio_id: str, data: RegistrarIntentoInput, db: Session = Depends(get_db)):
+    desafio = db.query(DesafioModel).filter(DesafioModel.id == desafio_id).first()
+    if not desafio:
+        raise HTTPException(status_code=404, detail="Desafío no encontrado")
+    
+    # Si el que envía es el Jugador 1 actualizando su resultado
+    if data.nombre_jugador == desafio.jugador1_nombre:
+        desafio.jugador1_puntaje = data.puntaje_total
+        desafio.jugador1_tiempo = data.tiempo_total
+    # Si el Jugador 2 ya está asignado y vuelve a enviar
+    elif desafio.jugador2_nombre and data.nombre_jugador == desafio.jugador2_nombre:
+        desafio.jugador2_puntaje = data.puntaje_total
+        desafio.jugador2_tiempo = data.tiempo_total
+    # Si es un nuevo jugador participando como Jugador 2
+    else:
+        desafio.jugador2_nombre = data.nombre_jugador
+        desafio.jugador2_puntaje = data.puntaje_total
+        desafio.jugador2_tiempo = data.tiempo_total
+        desafio.estado = "finalizado"  # Al registrar al J2, el desafío se completa
+        
     db.commit()
-    return {"codigo": codigo, "total": len(elegidas)}
-
-
-@router.get("/{codigo}")
-def obtener_desafio(codigo: str, db: Session = Depends(get_db)):
-    desafio = buscar_desafio(db, codigo)
-    pares = cargar_pares(db, desafio)
-    cantidad_terminados = (
-        db.query(ResultadoDesafioModel).filter(ResultadoDesafioModel.codigo == desafio.codigo).count()
-    )
-    return {
-        "codigo": desafio.codigo,
-        "total": len(pares),
-        "terminados": cantidad_terminados,
-        "preguntas": [
-            {
-                "id": q.id,
-                "categoria": q.categoria,
-                "pregunta": q.pregunta,
-                "opciones": opciones_en_orden_fijo(desafio.codigo, q),
-                "tiempo_limite": item["tiempo_limite"],
-                # OJO: no se envía la respuesta correcta
-            }
-            for item, q in pares
-        ],
-    }
-
-
-@router.post("/{codigo}/resultado")
-def guardar_resultado(codigo: str, entrada: ResultadoInput, db: Session = Depends(get_db)):
-    desafio = buscar_desafio(db, codigo)
-    existentes = db.query(ResultadoDesafioModel).filter(ResultadoDesafioModel.codigo == desafio.codigo).all()
-
-    if any(r.jugador_id == entrada.jugador_id for r in existentes):
-        raise HTTPException(status_code=409, detail="Ya enviaste tu resultado de este desafío")
-    if len(existentes) >= 2:
-        raise HTTPException(status_code=409, detail="Este desafío ya tiene dos jugadores")
-
-    pares = cargar_pares(db, desafio)
-    esperadas = sorted(q.id for _, q in pares)
-    recibidas = sorted(r.pregunta_id for r in entrada.respuestas)
-    if esperadas != recibidas:
-        raise HTTPException(status_code=400, detail="Las respuestas no coinciden con las preguntas del desafío")
-
-    aciertos, tiempo_total_ms, detalle = evaluar_respuestas(
-        pares, {r.pregunta_id: r for r in entrada.respuestas}
-    )
-    nombre = entrada.nombre.strip()[:30] or "Jugador"
-    db.add(ResultadoDesafioModel(
-        codigo=desafio.codigo,
-        jugador_id=entrada.jugador_id,
-        nombre=nombre,
-        aciertos=aciertos,
-        tiempo_total_ms=tiempo_total_ms,
-        detalle=detalle,
-    ))
-    db.commit()
-    return {"codigo": desafio.codigo, "aciertos": aciertos, "total": len(detalle), "tiempo_total_ms": tiempo_total_ms}
-
-
-@router.get("/{codigo}/reporte")
-def obtener_reporte(codigo: str, jugador_id: str, db: Session = Depends(get_db)):
-    desafio = buscar_desafio(db, codigo)
-    resultados = db.query(ResultadoDesafioModel).filter(ResultadoDesafioModel.codigo == desafio.codigo).all()
-
-    yo = next((r for r in resultados if r.jugador_id == jugador_id), None)
-    if yo is None:
-        raise HTTPException(status_code=403, detail="Primero tenés que terminar tu participación")
-    rival = next((r for r in resultados if r.jugador_id != jugador_id), None)
-
-    ganador, criterio = (None, None)
-    if rival is not None:
-        ganador, criterio = decidir_ganador(yo, rival)
+    db.refresh(desafio)
+    
+    ganador = None
+    if desafio.estado == "finalizado":
+        if (desafio.jugador1_puntaje or 0) > (desafio.jugador2_puntaje or 0):
+            ganador = desafio.jugador1_nombre
+        elif (desafio.jugador2_puntaje or 0) > (desafio.jugador1_puntaje or 0):
+            ganador = desafio.jugador2_nombre
+        else:
+            # Desempate por menor tiempo total acumulado (gana el que hizo menos segundos)
+            if (desafio.jugador1_tiempo or 999) < (desafio.jugador2_tiempo or 999):
+                ganador = desafio.jugador1_nombre
+            else:
+                ganador = desafio.jugador2_nombre
 
     return {
-        "codigo": desafio.codigo,
-        "estado": "finalizado" if rival is not None else "esperando_rival",
-        "yo": serializar_resultado(yo),
-        "rival": serializar_resultado(rival) if rival is not None else None,
+        "estado": desafio.estado,
         "ganador": ganador,
-        "criterio": criterio,
+        "jugador1": {"nombre": desafio.jugador1_nombre, "puntaje": desafio.jugador1_puntaje, "tiempo": desafio.jugador1_tiempo},
+        "jugador2": {"nombre": desafio.jugador2_nombre, "puntaje": desafio.jugador2_puntaje, "tiempo": desafio.jugador2_tiempo}
     }
