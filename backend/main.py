@@ -220,10 +220,10 @@ def registrar_respuesta(id: int, respuesta: RespuestaInput, db: Session = Depend
 
 
 # ==========================================================
-# CONFIGURACIÓN PARA SERVIR EL FRONTEND DE REACT EN PRODUCTION
+# CONFIGURACIÓN PARA SERVIR EL FRONTEND DE REACT EN RENDER
 # ==========================================================
 
-frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dist"))
+frontend_dist = os.path.join(os.path.dirname(__file__), "dist")
 
 if os.path.exists(frontend_dist):
     # Monta la carpeta de assets compilados por Vite/React (JS, CSS, imágenes)
@@ -240,5 +240,5 @@ if os.path.exists(frontend_dist):
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)
         
-        # En cualquier otro caso devuelves el index.html para que React Router maneje las rutas
+        # En cualquier otro caso devolvemos el index.html para que React Router maneje las rutas
         return FileResponse(os.path.join(frontend_dist, "index.html"))
