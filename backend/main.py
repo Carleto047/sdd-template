@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from database import SessionLocal, engine, Base
 from models import QuestionModel
 from desafio import router as desafio_router
+from ia_generator import generar_10_preguntas_nuevas  # 👈 Importamos el generador de IA
 
 Base.metadata.create_all(bind=engine)
 
@@ -31,8 +32,7 @@ ARCHIVO_SEMILLA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preg
 
 def sembrar_preguntas():
     """
-    Si una categoría no tiene preguntas en la base (por ejemplo, la base nueva de Render),
-    las carga desde preguntas_semilla.json. Si la categoría ya tiene preguntas, no toca nada.
+    Si una categoría no tiene preguntas en la base, las carga desde preguntas_semilla.json.
     """
     if not os.path.exists(ARCHIVO_SEMILLA):
         return
@@ -55,6 +55,7 @@ def sembrar_preguntas():
                 dificultad=p.get("dificultad") or "normal",
                 veces_correcta=0,
                 veces_incorrecta=0,
+                usada=False,  # 👈 Inicializamos en False
             ))
             nuevas += 1
         db.commit()
@@ -105,16 +106,69 @@ def get_question(id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/question/random/{categoria}")
 def get_random_question(categoria: str, db: Session = Depends(get_db)):
-    preguntas = db.query(QuestionModel).filter(QuestionModel.categoria == categoria).all()
-    if not preguntas:
+    """
+    Obtiene una pregunta aleatoria de la categoría.
+    Evalúa si se alcanzó el 75% de uso para generar 10 preguntas nuevas mediante IA,
+    evitando la repetición inmediata marcándolas como usadas.
+    """
+    preguntas_categoria = db.query(QuestionModel).filter(QuestionModel.categoria == categoria).all()
+    total_preguntas = len(preguntas_categoria)
+    
+    if total_preguntas == 0:
         raise HTTPException(status_code=404, detail=f"No hay preguntas para la categoría: {categoria}")
-    return a_respuesta(random.choice(preguntas))
+
+    # 1. Calcular el porcentaje de uso actual de la categoría
+    preguntas_usadas = [p for p in preguntas_categoria if getattr(p, "usada", False)]
+    porcentaje_uso = (len(preguntas_usadas) / total_preguntas) * 100
+
+    # 2. Si se alcanza o supera el 75%, generamos 10 preguntas nuevas con IA y las guardamos en PostgreSQL
+    if porcentaje_uso >= 75:
+        print(f"La categoría '{categoria}' alcanzó el {porcentaje_uso:.1f}%. Generando 10 preguntas nuevas con IA...")
+        nuevas_preguntas_data = generar_10_preguntas_nuevas(categoria)
+        
+        for q_data in nuevas_preguntas_data:
+            nueva_p = QuestionModel(
+                categoria=q_data.get("categoria", categoria),
+                pregunta=q_data.get("pregunta"),
+                opciones=q_data.get("opciones"),
+                respuesta_correcta=q_data.get("respuesta_correcta"),
+                dificultad=q_data.get("dificultad", "normal"),
+                veces_correcta=0,
+                veces_incorrecta=0,
+                usada=False
+            )
+            db.add(nueva_p)
+        
+        db.commit()
+        
+        # Recargamos la lista actualizada incluyendo las nuevas preguntas de la IA
+        preguntas_categoria = db.query(QuestionModel).filter(QuestionModel.categoria == categoria).all()
+
+    # 3. Filtrar únicamente las preguntas que no han sido marcadas como usadas
+    preguntas_disponibles = [p for p in preguntas_categoria if not getattr(p, "usada", False)]
+    
+    # Si por alguna razón ya se usaron todas pero no se cumplió el 75%, reseteamos el estado 'usada'
+    if not preguntas_disponibles:
+        for p in preguntas_categoria:
+            p.usada = False
+        db.commit()
+        preguntas_disponibles = preguntas_categoria
+
+    # 4. Seleccionar una pregunta al azar de las disponibles
+    pregunta_elegida = random.choice(preguntas_disponibles)
+    
+    # 5. Marcarla como usada para evitar repeticiones en las siguientes rondas
+    pregunta_elegida.usada = True
+    db.commit()
+    db.refresh(pregunta_elegida)
+
+    return a_respuesta(pregunta_elegida)
 
 @app.post("/api/v1/question/{id}/responder")
 def registrar_respuesta(id: int, respuesta: RespuestaInput, db: Session = Depends(get_db)):
     """
     Se llama cada vez que un jugador responde una pregunta.
-    Actualiza el contador de aciertos/errores y, al llegar a 5 respuestas registradas para esa pregunta, la reclasifica como fácil, difícil o normal.
+    Actualiza el contador de aciertos/errores y reclasifica la dificultad.
     """
     pregunta = db.query(QuestionModel).filter(QuestionModel.id == id).first()
     if not pregunta:
