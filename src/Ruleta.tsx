@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Wheel } from 'react-custom-roulette';
 import confetti from 'canvas-confetti';
-import Desafio from './Desafio';
+import Multijugador from './Multijugador';
 import { obtenerPregunta, despertarServidor } from './servicioPreguntas';
 import type { EstadoServidor } from './servicioPreguntas';
 
@@ -58,9 +58,16 @@ const STICKERS_CATEGORIA: Record<string, string> = {
 type Modo = 'solo' | 'duelo' | 'desafio' | 'online';
 
 export default function Ruleta() {
-  const [modo, setModo] = useState<Modo>(() =>
-    new URLSearchParams(window.location.search).get('desafio') ? 'online' : 'solo'
-  );
+  const [modo, setModo] = useState<Modo>(() => {
+    const parametros = new URLSearchParams(window.location.search);
+
+    return (
+      parametros.has('sala') ||
+      parametros.has('desafio')
+    )
+      ? 'online'
+      : 'solo';
+  });
 
   // --- Estado compartido ---
   const [mustSpin, setMustSpin] = useState(false);
@@ -601,14 +608,14 @@ export default function Ruleta() {
     </div>
   );
 
-  if (modo === 'online') {
-    return (
-      <div className="game-container">
-        {BarraSuperior}
-        <Desafio />
-      </div>
-    );
-  }
+if (modo === 'online') {
+  return (
+    <div className="game-container">
+      {BarraSuperior}
+      <Multijugador />
+    </div>
+  );
+}
 
   if (modo === 'solo' && bloqueadoHasta) {
     return (
