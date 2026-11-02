@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Wheel } from 'react-custom-roulette';
 import confetti from 'canvas-confetti';
+import Desafio from './Desafio';
+import { obtenerPregunta, despertarServidor } from './servicioPreguntas';
+import type { EstadoServidor } from './servicioPreguntas';
 
 const VIDAS_INICIALES = 3;
 const MINUTOS_BLOQUEO = 20;
@@ -52,10 +55,12 @@ const STICKERS_CATEGORIA: Record<string, string> = {
   'IESETyFP': '🎓'
 };
 
-type Modo = 'solo' | 'duelo' | 'desafio';
+type Modo = 'solo' | 'duelo' | 'desafio' | 'online';
 
 export default function Ruleta() {
-  const [modo, setModo] = useState<Modo>('solo');
+  const [modo, setModo] = useState<Modo>(() =>
+    new URLSearchParams(window.location.search).get('desafio') ? 'online' : 'solo'
+  );
 
   // --- Estado compartido ---
   const [mustSpin, setMustSpin] = useState(false);
@@ -71,6 +76,10 @@ export default function Ruleta() {
   const [opcionesOcultas, setOpcionesOcultas] = useState<string[]>([]);
   const preguntasRecientesRef = useRef<number[]>([]);
   const ticReproducidoRef = useRef<boolean>(false);
+  const origenPreguntaRef = useRef<'servidor' | 'local'>('servidor');
+  const tarjetaPreguntaRef = useRef<HTMLDivElement | null>(null);
+  const [estadoServidor, setEstadoServidor] = useState<EstadoServidor>('conectando');
+  const [errorCarga, setErrorCarga] = useState<string>('');
 
   // --- Estado 1 Jugador ---
   const [rachaCorrectas, setRachaCorrectas] = useState<number>(0);
@@ -110,6 +119,19 @@ export default function Ruleta() {
   const musicaRef = useRef<HTMLAudioElement | null>(null);
   const [musicaSilenciada, setMusicaSilenciada] = useState<boolean>(false);
   const [pantallaCompleta, setPantallaCompleta] = useState<boolean>(false);
+
+  // Despierta al servidor apenas se abre el juego y muestra su estado
+  useEffect(() => despertarServidor(API_BASE_URL, setEstadoServidor), []);
+
+  // En el celular la pregunta aparece debajo de la ruleta: se baja sola hasta ella (y vuelve arriba al continuar)
+  useEffect(() => {
+    if (window.innerWidth >= 900) return;
+    if (pregunta && tarjetaPreguntaRef.current) {
+      tarjetaPreguntaRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (!pregunta) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [pregunta]);
 
   useEffect(() => {
     const audio = new Audio();
@@ -220,6 +242,7 @@ export default function Ruleta() {
   };
 
   const enviarRespuestaAlBackend = async (idPregunta: number, esCorrecta: boolean) => {
+    if (origenPreguntaRef.current !== 'servidor') return; // las preguntas guardadas en el dispositivo no suman estadísticas
     try {
       await fetch(`${API_BASE_URL}/api/v1/question/${idPregunta}/responder`, {
         method: 'POST',
@@ -291,49 +314,24 @@ export default function Ruleta() {
     cargarPregunta(categoriaElegida);
   };
 
-  // --- FUNCIÓN BLINDADA CON REINTENTOS Y RESPALDO LOCAL ---
+  // --- Pregunta del servidor; si falla, pregunta REAL guardada en el dispositivo ---
   const cargarPregunta = async (categoriaElegida: string) => {
     setCargando(true);
-    let dataPregunta: any = null;
-    
+    setErrorCarga('');
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/question/random/${categoriaElegida}`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
-        mode: 'cors'
-      });
-
-      if (response.ok) {
-        dataPregunta = await response.json();
-      } else {
-        throw new Error(`Error HTTP: ${response.status}`);
-      }
+      const p = await obtenerPregunta(API_BASE_URL, categoriaElegida, preguntasRecientesRef.current, setEstadoServidor);
+      origenPreguntaRef.current = p.origen;
+      preguntasRecientesRef.current = [p.id, ...preguntasRecientesRef.current].slice(0, 15);
+      setPregunta(p);
+      setOpcionesMezcladas(mezclarOpciones(p.opciones));
+      setTiempoInicio(Date.now());
+      setTiempoRestante(p.tiempo_limite);
+      setTimerActivo(true);
     } catch (error) {
-      console.warn("Servidor inactivo o bloqueo de red. Usando respaldo de emergencia...", error);
-      // Respaldo automático para evitar que la interfaz se quede colgada en móviles
-      dataPregunta = {
-        id: Math.floor(Math.random() * 1000),
-        categoria: categoriaElegida,
-        pregunta: `Pregunta de práctica sobre ${categoriaElegida} (Servidor despertando)`,
-        opciones: ["Opción Correcta", "Opción Incorrecta A", "Opción Incorrecta B", "Opción Incorrecta C"],
-        respuesta_correcta: "Opción Correcta",
-        dificultad: "Fácil",
-        tiempo_limite: 30
-      };
+      console.error(error);
+      setErrorCarga('No se pudo cargar la pregunta. Revisá tu conexión y volvé a girar.');
     } finally {
       setCargando(false);
-    }
-
-    if (dataPregunta) {
-      preguntasRecientesRef.current = [dataPregunta.id, ...preguntasRecientesRef.current].slice(0, 15);
-      setPregunta(dataPregunta);
-      setOpcionesMezcladas(mezclarOpciones(dataPregunta.opciones));
-      setTiempoInicio(Date.now());
-      setTiempoRestante(dataPregunta.tiempo_limite);
-      setTimerActivo(true);
     }
   };
 
@@ -581,6 +579,12 @@ export default function Ruleta() {
         🎯 Desafío (14 Preg.)
       </button>
       <button
+        onClick={() => cambiarModo('online')}
+        className={`nav-btn ${modo === 'online' ? 'active' : ''}`}
+      >
+        📱 Desafío online
+      </button>
+      <button
         onClick={() => setMusicaSilenciada((m) => !m)}
         title={musicaSilenciada ? 'Activar música' : 'Silenciar música'}
         className="icon-btn"
@@ -596,6 +600,15 @@ export default function Ruleta() {
       </button>
     </div>
   );
+
+  if (modo === 'online') {
+    return (
+      <div className="game-container">
+        {BarraSuperior}
+        <Desafio />
+      </div>
+    );
+  }
 
   if (modo === 'solo' && bloqueadoHasta) {
     return (
@@ -800,8 +813,38 @@ export default function Ruleta() {
           box-shadow: 0 0 25px rgba(99, 102, 241, 0.4);
           transform: scale(1.02);
         }
+
+        .estado-servidor {
+          text-align: center;
+          font-size: 13px;
+          font-weight: 600;
+          padding: 6px 14px;
+          border-radius: 20px;
+          margin: -10px auto 16px auto;
+          width: fit-content;
+          max-width: 92%;
+          background: rgba(255, 255, 255, 0.92);
+          color: #1e293b;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        @media (max-width: 640px) {
+          .game-container { padding: 12px; }
+          .barra-superior-animada { padding: 10px 12px; gap: 8px; }
+          .nav-btn { padding: 8px 12px; font-size: 14px; }
+          .capibara-img { width: 110px; max-height: 140px; }
+          .player-panel { width: 100%; box-sizing: border-box; }
+          .main-card-game { padding: 18px; }
+          .opcion-btn { font-size: 15px; padding: 14px; }
+        }
       `}</style>
       {BarraSuperior}
+
+      <div className="estado-servidor">
+        {estadoServidor === 'en_linea' && '🟢 Servidor en línea'}
+        {estadoServidor === 'conectando' && '🟡 Conectando con el servidor… (la primera vez puede tardar hasta 1 minuto)'}
+        {estadoServidor === 'sin_conexion' && '📴 Sin servidor: jugás con las preguntas guardadas en este dispositivo'}
+      </div>
 
       <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-start', gap: '30px', marginTop: '10px', flexWrap: 'wrap', padding: '0 16px' }}>
         
@@ -971,6 +1014,7 @@ export default function Ruleta() {
                 {mustSpin ? 'Girando ruleta...' : '¡Girar Ruleta!'}
               </button>
               {cargando && <p style={{ color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>Cargando pregunta...</p>}
+              {errorCarga && <p style={{ color: '#ffffff', background: '#dc2626', padding: '8px 14px', borderRadius: '12px', fontWeight: 'bold', maxWidth: '320px', textAlign: 'center' }}>{errorCarga}</p>}
             </>
           )}
         </div>
@@ -1003,9 +1047,9 @@ export default function Ruleta() {
         )}
 
         {/* CARD DE PREGUNTAS MODERNA Y FLUIDA */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: '320px', maxWidth: '450px', width: '100%', marginTop: '30px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 'min(320px, 100%)', maxWidth: '450px', width: '100%', marginTop: '30px' }}>
           {pregunta && !((modo === 'solo' && juegoTerminado) || (modo === 'duelo' && ganadorDuelo) || (modo === 'desafio' && desafioTerminado)) && (
-            <div className="main-card-game">
+            <div className="main-card-game" ref={tarjetaPreguntaRef}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
                 <span style={{ backgroundColor: '#e0e7ff', padding: '6px 14px', borderRadius: '20px', fontSize: '14px', fontWeight: '700', color: '#3730a3' }}>
                   {STICKERS_CATEGORIA[pregunta.categoria]} {pregunta.categoria}
