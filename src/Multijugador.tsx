@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './Multijugador.css';
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://preguntados-backend-ppdb.onrender.com').replace(/\/+$/, '');
+const API_BASE_URL = '';
 const CATEGORIAS = ['Geografía', 'Ciencia', 'Historia', 'Arte', 'Deportes', 'Entretenimiento', 'IESETyFP'];
 
 type Modo = '1v1' | 'desafio';
